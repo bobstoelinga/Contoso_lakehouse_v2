@@ -25,30 +25,9 @@ resources:
         on_failure:
           - data-platform-alerts@contoso.com
 
-      job_clusters:
-        - job_cluster_key: ingest
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            node_type_id: ${var.node_type}
-            autoscale:
-              min_workers: 2
-              max_workers: 8
-            data_security_mode: SINGLE_USER
-            spark_conf:
-              spark.databricks.delta.schema.autoMerge.enabled: "true"
-        - job_cluster_key: transform
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            node_type_id: ${var.node_type}
-            autoscale:
-              min_workers: 2
-              max_workers: 12
-            data_security_mode: SINGLE_USER
-
       tasks:
         # ------------------------------------------------------------------
         - task_key: validate_metadata
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/99_validate_metadata.py
             base_parameters:
@@ -58,7 +37,6 @@ resources:
         # ------------------------------------------------------------------
         - task_key: bronze_ingest
           depends_on: [{ task_key: validate_metadata }]
-          job_cluster_key: ingest
           # Schema evolution laat de stream bewust falen bij een nieuwe kolom;
           # de retry pikt het nieuwe schema op. Zonder retries stopt de pipeline.
           max_retries: 3
@@ -74,7 +52,6 @@ resources:
         # ------------------------------------------------------------------
         - task_key: delivery_gate
           depends_on: [{ task_key: bronze_ingest }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/05_delivery_gate.py
             base_parameters:
@@ -93,7 +70,6 @@ resources:
         # ------------------------------------------------------------------
         - task_key: quality
           depends_on: [{ task_key: gate_is_open, outcome: "true" }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/20_quality.py
             base_parameters:
@@ -106,7 +82,6 @@ resources:
         # ------------------------------------------------------------------
         - task_key: raw_vault
           depends_on: [{ task_key: quality }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/30_data_vault.py
             base_parameters:
@@ -118,7 +93,6 @@ resources:
 
         - task_key: business_vault
           depends_on: [{ task_key: raw_vault }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/30_data_vault.py
             base_parameters:
@@ -131,7 +105,6 @@ resources:
         # ------------------------------------------------------------------
         - task_key: gold_historical
           depends_on: [{ task_key: business_vault }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/40_gold_historical.py
             base_parameters:
@@ -144,7 +117,6 @@ resources:
         # Faalt deze taak, dan blijft de vorige Gold Actueel versie actief.
         - task_key: gold_current
           depends_on: [{ task_key: gold_historical }]
-          job_cluster_key: transform
           notebook_task:
             notebook_path: ../notebooks/41_gold_current.py
             base_parameters:

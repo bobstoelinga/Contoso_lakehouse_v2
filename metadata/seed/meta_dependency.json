@@ -1,0 +1,58 @@
+[
+  {
+    "dependency_id": "DEP-QA-ORDERS",
+    "entity_id": "SALES.ORDERS",
+    "entity_layer": "QUALITY",
+    "depends_on_entity_id": "SALES",
+    "depends_on_layer": "BRONZE",
+    "dependency_type": "DELIVERY_COMPLETE",
+    "is_blocking": true,
+    "is_active": true
+  },
+  {
+    "dependency_id": "DEP-QA-CUSTOMERS",
+    "entity_id": "SALES.CUSTOMERS",
+    "entity_layer": "QUALITY",
+    "depends_on_entity_id": "SALES",
+    "depends_on_layer": "BRONZE",
+    "dependency_type": "DELIVERY_COMPLETE",
+    "is_blocking": true,
+    "is_active": true
+  },
+  {
+    "dependency_id": "DEP-QA-PRODUCTS",
+    "entity_id": "SALES.PRODUCTS",
+    "entity_layer": "QUALITY",
+    "depends_on_entity_id": "SALES",
+    "depends_on_layer": "BRONZE",
+    "dependency_type": "DELIVERY_COMPLETE",
+    "is_blocking": true,
+    "is_active": true
+  },
+
+  { "dependency_id": "DEP-HUBCUST",  "entity_id": "HUB_CUSTOMER",      "entity_layer": "RAW_VAULT", "depends_on_entity_id": "SALES.CUSTOMERS", "depends_on_layer": "QUALITY",   "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-HUBPROD",  "entity_id": "HUB_PRODUCT",       "entity_layer": "RAW_VAULT", "depends_on_entity_id": "SALES.PRODUCTS",  "depends_on_layer": "QUALITY",   "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-HUBORD",   "entity_id": "HUB_ORDER",         "entity_layer": "RAW_VAULT", "depends_on_entity_id": "SALES.ORDERS",    "depends_on_layer": "QUALITY",   "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+
+  { "dependency_id": "DEP-LNKOC-1",  "entity_id": "LNK_ORDER_CUSTOMER", "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_ORDER",      "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-LNKOC-2",  "entity_id": "LNK_ORDER_CUSTOMER", "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_CUSTOMER",   "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-LNKOP-1",  "entity_id": "LNK_ORDER_PRODUCT",  "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_ORDER",      "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-LNKOP-2",  "entity_id": "LNK_ORDER_PRODUCT",  "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_PRODUCT",    "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+
+  { "dependency_id": "DEP-SATCUST",  "entity_id": "SAT_CUSTOMER",       "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_CUSTOMER",   "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-SATPROD",  "entity_id": "SAT_PRODUCT",        "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_PRODUCT",    "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-SATORD",   "entity_id": "SAT_ORDER",          "entity_layer": "RAW_VAULT", "depends_on_entity_id": "HUB_ORDER",      "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-SATOL",    "entity_id": "SAT_ORDER_LINE",     "entity_layer": "RAW_VAULT", "depends_on_entity_id": "LNK_ORDER_PRODUCT","depends_on_layer": "RAW_VAULT","dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+
+  { "dependency_id": "DEP-BVCUST",   "entity_id": "SAT_CUSTOMER_BV",    "entity_layer": "BUSINESS_VAULT", "depends_on_entity_id": "SAT_CUSTOMER",     "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-BVORD",    "entity_id": "SAT_ORDER_LINE_BV",  "entity_layer": "BUSINESS_VAULT", "depends_on_entity_id": "SAT_ORDER_LINE",   "depends_on_layer": "RAW_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-PITCUST",  "entity_id": "PIT_CUSTOMER",       "entity_layer": "BUSINESS_VAULT", "depends_on_entity_id": "SAT_CUSTOMER_BV",  "depends_on_layer": "BUSINESS_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+
+  { "dependency_id": "DEP-GH-DIMCUST", "entity_id": "GH_DIM_CUSTOMER", "entity_layer": "GOLD_HIST", "depends_on_entity_id": "SAT_CUSTOMER_BV",   "depends_on_layer": "BUSINESS_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-GH-DIMPROD", "entity_id": "GH_DIM_PRODUCT",  "entity_layer": "GOLD_HIST", "depends_on_entity_id": "SAT_PRODUCT",      "depends_on_layer": "RAW_VAULT",      "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-GH-FCTSALE", "entity_id": "GH_FCT_SALES",    "entity_layer": "GOLD_HIST", "depends_on_entity_id": "SAT_ORDER_LINE_BV","depends_on_layer": "BUSINESS_VAULT", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+
+  { "dependency_id": "DEP-GC-DIMCUST", "entity_id": "GC_DIM_CUSTOMER", "entity_layer": "GOLD_CURR", "depends_on_entity_id": "GH_DIM_CUSTOMER", "depends_on_layer": "GOLD_HIST", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-GC-DIMPROD", "entity_id": "GC_DIM_PRODUCT",  "entity_layer": "GOLD_CURR", "depends_on_entity_id": "GH_DIM_PRODUCT",  "depends_on_layer": "GOLD_HIST", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true },
+  { "dependency_id": "DEP-GC-FCTSALE", "entity_id": "GC_FCT_SALES",    "entity_layer": "GOLD_CURR", "depends_on_entity_id": "GH_FCT_SALES",    "depends_on_layer": "GOLD_HIST", "dependency_type": "UPSTREAM_SUCCESS", "is_blocking": true, "is_active": true }
+]

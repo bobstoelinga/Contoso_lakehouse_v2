@@ -1,0 +1,10 @@
+[
+  {
+    "source_system_id": "SALES",
+    "source_system_name": "Contoso Sales (ERP export)",
+    "landing_volume_path": "/Volumes/raw_${env}/sales/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "DAILY",
+    "is_active": true
+  }
+]

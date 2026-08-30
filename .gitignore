@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Databricks
+.databricks/
+.databricks-login.json
+**/.ipynb_checkpoints/
+
+# Local build/output
+dist/
+build/
+*.log
+_local_output/
+
+# Editors / OS
+.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db

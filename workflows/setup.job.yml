@@ -1,0 +1,27 @@
+# Eenmalige/idempotente opbouw van het lakehouse en de metadata.
+resources:
+  jobs:
+    setup_lakehouse:
+      name: "[${var.env}] Contoso — Setup Lakehouse"
+      description: >-
+        Bouwt Unity Catalog, de metadatatabellen en alle Delta tabellen, laadt de
+        metadata seed en valideert het model. Idempotent; veilig om te herhalen.
+      max_concurrent_runs: 1
+
+      job_clusters:
+        - job_cluster_key: setup
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: ${var.node_type}
+            num_workers: 1
+            data_security_mode: SINGLE_USER
+
+      tasks:
+        - task_key: create_objects
+          job_cluster_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/00_setup_lakehouse.py
+            base_parameters:
+              env: ${var.env}
+              storage_account: ${var.storage_account}
+              repo_root: ${workspace.file_path}

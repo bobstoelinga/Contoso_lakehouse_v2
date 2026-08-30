@@ -1,0 +1,113 @@
+[
+  {
+    "source_object_id": "SALES.CUSTOMERS",
+    "source_system_id": "SALES",
+    "object_name": "customers",
+    "file_pattern": "customers*.parquet",
+    "file_format": "parquet",
+    "reader_options": { "mergeSchema": "true" },
+
+    "load_strategy": "SNAPSHOT_SCD2",
+    "business_key_columns": ["customer_key"],
+    "change_tracking_columns": [
+      "customer_name", "email", "phone", "address_line1", "city",
+      "state_province", "postal_code", "country", "customer_segment"
+    ],
+    "deleted_flag_column": "is_deleted",
+    "is_mandatory_in_delivery": true,
+
+    "bronze_catalog": "contoso_bronze_${env}",
+    "bronze_schema": "sales",
+    "bronze_table": "br_customers",
+    "bronze_partition_columns": ["_delivery_date"],
+
+    "checkpoint_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_customers/_checkpoint",
+    "schema_location_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_customers/_schema",
+    "schema_evolution_mode": "addNewColumns",
+    "max_files_per_trigger": 1000,
+
+    "quality_catalog": "contoso_quality_${env}",
+    "quality_schema": "sales",
+    "quality_table": "qa_customers",
+    "reject_catalog": "contoso_reject_${env}",
+    "reject_schema": "sales",
+    "reject_table": "rj_customers",
+
+    "load_order": 10,
+    "is_active": true
+  },
+  {
+    "source_object_id": "SALES.PRODUCTS",
+    "source_system_id": "SALES",
+    "object_name": "products",
+    "file_pattern": "products*.parquet",
+    "file_format": "parquet",
+    "reader_options": { "mergeSchema": "true" },
+
+    "load_strategy": "SNAPSHOT_SCD2",
+    "business_key_columns": ["product_key"],
+    "change_tracking_columns": [
+      "product_name", "product_category", "product_subcategory",
+      "brand", "unit_cost", "unit_price", "is_discontinued"
+    ],
+    "deleted_flag_column": "is_deleted",
+    "is_mandatory_in_delivery": true,
+
+    "bronze_catalog": "contoso_bronze_${env}",
+    "bronze_schema": "sales",
+    "bronze_table": "br_products",
+    "bronze_partition_columns": ["_delivery_date"],
+
+    "checkpoint_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_products/_checkpoint",
+    "schema_location_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_products/_schema",
+    "schema_evolution_mode": "addNewColumns",
+    "max_files_per_trigger": 1000,
+
+    "quality_catalog": "contoso_quality_${env}",
+    "quality_schema": "sales",
+    "quality_table": "qa_products",
+    "reject_catalog": "contoso_reject_${env}",
+    "reject_schema": "sales",
+    "reject_table": "rj_products",
+
+    "load_order": 20,
+    "is_active": true
+  },
+  {
+    "source_object_id": "SALES.ORDERS",
+    "source_system_id": "SALES",
+    "object_name": "orders",
+    "file_pattern": "orders*.parquet",
+    "file_format": "parquet",
+    "reader_options": { "mergeSchema": "true" },
+
+    "load_strategy": "INCREMENTAL_APPEND",
+    "business_key_columns": ["order_key", "order_line_number"],
+    "change_tracking_columns": [
+      "order_status", "quantity", "unit_price", "discount_amount",
+      "net_amount", "ship_date", "delivery_date"
+    ],
+    "deleted_flag_column": null,
+    "is_mandatory_in_delivery": true,
+
+    "bronze_catalog": "contoso_bronze_${env}",
+    "bronze_schema": "sales",
+    "bronze_table": "br_orders",
+    "bronze_partition_columns": ["_delivery_date"],
+
+    "checkpoint_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_orders/_checkpoint",
+    "schema_location_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_orders/_schema",
+    "schema_evolution_mode": "addNewColumns",
+    "max_files_per_trigger": 1000,
+
+    "quality_catalog": "contoso_quality_${env}",
+    "quality_schema": "sales",
+    "quality_table": "qa_orders",
+    "reject_catalog": "contoso_reject_${env}",
+    "reject_schema": "sales",
+    "reject_table": "rj_orders",
+
+    "load_order": 30,
+    "is_active": true
+  }
+]

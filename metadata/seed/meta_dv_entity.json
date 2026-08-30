@@ -1,0 +1,101 @@
+[
+  {
+    "dv_entity_id": "HUB_CUSTOMER", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_customer",
+    "hash_key_column": "hk_customer", "parent_entity_ids": null,
+    "business_key_columns": ["customer_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.CUSTOMERS'", "load_order": 10, "is_active": true
+  },
+  {
+    "dv_entity_id": "HUB_PRODUCT", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_product",
+    "hash_key_column": "hk_product", "parent_entity_ids": null,
+    "business_key_columns": ["product_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.PRODUCTS'", "load_order": 10, "is_active": true
+  },
+  {
+    "dv_entity_id": "HUB_ORDER", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_order",
+    "hash_key_column": "hk_order", "parent_entity_ids": null,
+    "business_key_columns": ["order_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 10, "is_active": true
+  },
+
+  {
+    "dv_entity_id": "LNK_ORDER_CUSTOMER", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "lnk_order_customer",
+    "hash_key_column": "hk_order_customer", "parent_entity_ids": ["HUB_ORDER", "HUB_CUSTOMER"],
+    "business_key_columns": ["order_key", "customer_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 20, "is_active": true
+  },
+  {
+    "dv_entity_id": "LNK_ORDER_PRODUCT", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "lnk_order_product",
+    "hash_key_column": "hk_order_product", "parent_entity_ids": ["HUB_ORDER", "HUB_PRODUCT"],
+    "business_key_columns": ["order_key", "order_line_number", "product_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 20, "is_active": true
+  },
+
+  {
+    "dv_entity_id": "SAT_CUSTOMER", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_customer",
+    "hash_key_column": "hk_customer", "parent_entity_ids": ["HUB_CUSTOMER"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.CUSTOMERS'", "load_order": 30, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_PRODUCT", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_product",
+    "hash_key_column": "hk_product", "parent_entity_ids": ["HUB_PRODUCT"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.PRODUCTS'", "load_order": 30, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_ORDER", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_order",
+    "hash_key_column": "hk_order", "parent_entity_ids": ["HUB_ORDER"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 30, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_ORDER_LINE", "dv_entity_type": "LINK_SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_order_line",
+    "hash_key_column": "hk_order_product", "parent_entity_ids": ["LNK_ORDER_PRODUCT"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 40, "is_active": true
+  },
+
+  {
+    "dv_entity_id": "SAT_CUSTOMER_BV", "dv_entity_type": "SATELLITE", "dv_zone": "BUSINESS_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "business_vault", "target_table": "sat_customer_bv",
+    "hash_key_column": "hk_customer", "parent_entity_ids": ["HUB_CUSTOMER"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'BV.CUSTOMER'", "load_order": 50, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_ORDER_LINE_BV", "dv_entity_type": "SATELLITE", "dv_zone": "BUSINESS_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "business_vault", "target_table": "sat_order_line_bv",
+    "hash_key_column": "hk_order_product", "parent_entity_ids": ["LNK_ORDER_PRODUCT"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'BV.ORDER_LINE'", "load_order": 50, "is_active": true
+  },
+  {
+    "dv_entity_id": "PIT_CUSTOMER", "dv_entity_type": "PIT", "dv_zone": "BUSINESS_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "business_vault", "target_table": "pit_customer",
+    "hash_key_column": "hk_customer", "parent_entity_ids": ["HUB_CUSTOMER", "SAT_CUSTOMER", "SAT_CUSTOMER_BV"],
+    "business_key_columns": null, "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'BV.PIT'", "load_order": 60, "is_active": true
+  }
+]

@@ -1,0 +1,33 @@
+Ontwerp een metadata-gedreven ETL-oplossing in Microsoft Fabric met een Lakehouse. De architectuur bestaat uit Volume, Brons, Quality, Data Vault, Historische Datamart en Actuele Datamart.
+
+Orders, Customers en Products komen uit hetzelfde bronsysteem. Bronbestanden worden opgeslagen in de Volume-laag per bron en per ontvangstdatum. Auto Loader leest altijd incrementeel vanuit Volume naar Brons.
+
+Nieuwe kolommen in bronbestanden moeten automatisch worden geaccepteerd via schema evolution.
+
+Voor een specifieke ontvangstdatum moeten Orders, Customers en Products allemaal succesvol geladen zijn voordat vervolgverwerking mag starten. Deze afhankelijkheid moet metadata-gestuurd worden afgehandeld.
+
+Vanuit Brons worden kwaliteitscontroles uitgevoerd. Afgekeurde records worden opgeslagen in een uitvaltabel.
+
+Gevalideerde gegevens worden geladen naar een Data Vault model.
+
+Vanuit de Data Vault wordt een historische datamart opgebouwd en daarnaast een actuele datamart. Een actuele datamart bevat de laatste succesvolle laadrun en blijft actief totdat een nieuwere succesvolle laadrun beschikbaar komt.
+
+Alle objecten, mappings, afhankelijkheden en kwaliteitsregels moeten metadata-gedreven zijn.
+
+---------------
+
+Gedraag je als Principal Data Architect gespecialiseerd in Databricks, Delta Lake en Data Vault 2.0.
+ 
+Voer een kritische review uit op mijn metadata-gedreven Lakehouse ontwerp.
+ 
+Zoek naar:
+- schaalbaarheidsproblemen
+- beheerproblemen
+- performance risico's
+- afhankelijkheidsproblemen
+- tekortkomingen in de metadata
+- ontbrekende laadstrategieën
+- risico's rondom schema evolution
+- risico's rondom actuele datamarts
+ 
+Doe expliciet aanbevelingen voor een enterprise omgeving met tientallen bronsystemen en honderden tabellen.

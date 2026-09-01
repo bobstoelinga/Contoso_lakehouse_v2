@@ -20,6 +20,10 @@ class QualityThresholdBreached(RuntimeError):
     """Wordt opgeworpen wanneer een regel met FAIL_BATCH zijn drempel overschrijdt."""
 
 
+class QualityBatchQuarantined(RuntimeError):
+    """Wordt opgeworpen nadat een delivery wegens DQ in quarantaine is gezet."""
+
+
 class QualityEngine:
     def __init__(self, spark: SparkSession, repo: MetadataRepository, ctx: RunContext) -> None:
         self.spark = spark
@@ -50,6 +54,13 @@ class QualityEngine:
             df = df.withColumn(self._rule_column(rule), F.expr(rule.rule_expression))
         return df
 
+    @staticmethod
+    def _failing_threshold_rules(breached_rules: list[QualityRule]) -> list[str]:
+        return [
+            rule.rule_name for rule in breached_rules
+            if rule.is_blocking and rule.on_threshold_breach == "FAIL_BATCH"
+        ]
+
     # -- publieke API -----------------------------------------------------
     def run(self, source_object_id: str, delivery_id: str) -> dict[str, int]:
         obj = self.repo.source_object(source_object_id)
@@ -71,11 +82,16 @@ class QualityEngine:
             total = evaluated.count()
             stats["rows_read"] = total
 
-            breach = self._log_results(evaluated, rules, total, source_object_id)
-            if breach:
+            breached_rules = self._log_results(evaluated, rules, total, source_object_id)
+            failures = self._failing_threshold_rules(breached_rules)
+            if failures:
                 raise QualityThresholdBreached(
-                    f"{source_object_id}: drempel overschreden voor {', '.join(breach)}"
+                    f"{source_object_id}: drempel overschreden voor {', '.join(failures)}"
                 )
+            quarantines = [
+                rule.rule_name for rule in breached_rules
+                if rule.on_threshold_breach == "QUARANTINE_BATCH"
+            ]
 
             error_cols = [self._rule_column(r) for r in errors]
             passed_expr = F.lit(True)
@@ -146,9 +162,15 @@ class QualityEngine:
 
             stats["rows_inserted"] = passed.count()
             stats["rows_rejected"] = total - stats["rows_inserted"]
+            if quarantines:
+                reason = f"{source_object_id}: batch in quarantaine wegens {', '.join(quarantines)}"
+                self.audit.quarantine_delivery(delivery_id, reason)
+                raise QualityBatchQuarantined(reason)
             return dict(stats)
 
-    def _log_results(self, df: DataFrame, rules, total: int, source_object_id: str) -> list[str]:
+    def _log_results(
+        self, df: DataFrame, rules: list[QualityRule], total: int, source_object_id: str,
+    ) -> list[QualityRule]:
         """Meet elke regel in één aggregatie en registreert het resultaat."""
         if not rules:
             return []
@@ -158,9 +180,9 @@ class QualityEngine:
         ]).collect()[0]
 
         run_id = str(uuid.uuid4())
-        breached: list[str] = []
+        breached: list[QualityRule] = []
         for rule in rules:
             failed = int(agg[self._rule_column(rule)] or 0)
             if self.audit.log_dq_result(run_id, source_object_id, rule, total, failed):
-                breached.append(rule.rule_name)
+                breached.append(rule)
         return breached

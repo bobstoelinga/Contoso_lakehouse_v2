@@ -148,6 +148,12 @@ MIGRATIONS = {
         "superseded_by": "STRING",
         "supersede_reason": "STRING",
         "supersede_approval_reference": "STRING",
+        "quarantined_at": "TIMESTAMP",
+        "quarantine_reason": "STRING",
+        "released_at": "TIMESTAMP",
+        "released_by": "STRING",
+        "release_reason": "STRING",
+        "release_approval_reference": "STRING",
     },
 }
 

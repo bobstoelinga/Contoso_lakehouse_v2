@@ -60,6 +60,8 @@ class QualityRule:
     threshold_pct: float | None
     is_blocking: bool = True
     rule_group: str = "CORE"
+    evaluation_scope: str = "ROW"
+    on_threshold_breach: str = "FAIL_BATCH"
 
     @property
     def is_set_level(self) -> bool:
@@ -197,6 +199,8 @@ class MetadataRepository:
                 threshold_pct=r.threshold_pct,
                 is_blocking=bool(getattr(r, "is_blocking", True)),
                 rule_group=getattr(r, "rule_group", "CORE"),
+                evaluation_scope=getattr(r, "evaluation_scope", "ROW"),
+                on_threshold_breach=getattr(r, "on_threshold_breach", "FAIL_BATCH"),
             )
             for r in rows
         ]

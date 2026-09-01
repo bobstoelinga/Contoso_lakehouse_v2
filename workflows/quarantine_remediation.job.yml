@@ -1,0 +1,29 @@
+# Handmatige beheeractie voor gecontroleerde vrijgave van een DQ-quarantaine.
+resources:
+  jobs:
+    release_quarantined_delivery:
+      name: "[${var.env}] Contoso - Release Quarantined Delivery"
+      description: >-
+        Zet uitsluitend een QUARANTINED levering gecontroleerd terug naar COMPLETE,
+        met verplichte reden, goedkeurder en goedkeuringsreferentie.
+      max_concurrent_runs: 1
+      parameters:
+        - name: delivery_id
+          default: ""
+        - name: reason
+          default: ""
+        - name: approved_by
+          default: ""
+        - name: approval_reference
+          default: ""
+      tasks:
+        - task_key: release_quarantined_delivery
+          notebook_task:
+            notebook_path: ../notebooks/08_release_quarantined_delivery.py
+            base_parameters:
+              env: ${var.env}
+              delivery_id: "{{job.parameters.delivery_id}}"
+              reason: "{{job.parameters.reason}}"
+              approved_by: "{{job.parameters.approved_by}}"
+              approval_reference: "{{job.parameters.approval_reference}}"
+              repo_root: ${workspace.file_path}

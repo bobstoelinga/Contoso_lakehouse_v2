@@ -9,13 +9,21 @@ from pathlib import Path
 import pytest
 
 from contoso_lakehouse.context import Settings
-from contoso_lakehouse.bronze import BronzeLoader
+from contoso_lakehouse.audit import AuditLogger
+from contoso_lakehouse.bronze import BronzeLoader, SchemaDriftError
 from contoso_lakehouse.gold import GoldLoader
 from contoso_lakehouse.hashing import hash_key, hashdiff
 from contoso_lakehouse.metadata import GoldEntity
-from contoso_lakehouse.orchestration import parallel_execution_waves
+from contoso_lakehouse.orchestration import (
+    DependencyCycleError,
+    GateNotOpenError,
+    Orchestrator,
+    parallel_execution_waves,
+)
+from contoso_lakehouse.quality import QualityBatchQuarantined, QualityEngine
 from contoso_lakehouse.seed import metadata_version
 from contoso_lakehouse.sqlutil import safe_identifier
+from contoso_lakehouse.validation import MetadataValidator
 
 SEED_DIR = Path(__file__).resolve().parents[1] / "metadata" / "seed"
 METADATA_DDL = (
@@ -81,6 +89,23 @@ def test_quality_rule_expressions_resolve_all_placeholders():
         assert not re.search(r"\{[a-z_]+\}", expression), rule["rule_id"]
 
 
+def test_quality_threshold_failure_requires_a_blocking_fail_batch_rule():
+    warning = type("Rule", (), {"rule_name": "warning_rule", "is_blocking": False, "on_threshold_breach": "FAIL_BATCH"})()
+    warn_only = type("Rule", (), {"rule_name": "warn_only_rule", "is_blocking": True, "on_threshold_breach": "WARN_ONLY"})()
+    blocking = type("Rule", (), {"rule_name": "blocking_rule", "is_blocking": True, "on_threshold_breach": "FAIL_BATCH"})()
+
+    assert QualityEngine._failing_threshold_rules([warning, warn_only, blocking]) == ["blocking_rule"]
+
+
+def test_quarantine_threshold_policy_is_excluded_from_failure_filter():
+    quarantined = type("Rule", (), {
+        "rule_name": "quarantine_rule", "is_blocking": True, "on_threshold_breach": "QUARANTINE_BATCH"
+    })()
+
+    assert QualityEngine._failing_threshold_rules([quarantined]) == []
+    assert issubclass(QualityBatchQuarantined, RuntimeError)
+
+
 def test_metadata_version_is_deterministic_across_json_key_order():
     first = {"meta_source_object": [{"object_name": "orders", "load_order": 10}]}
     reordered = {"meta_source_object": [{"load_order": 10, "object_name": "orders"}]}
@@ -101,6 +126,123 @@ def test_parallel_execution_waves_respect_dependencies_and_worker_limit():
         ["LNK_ORDER_PRODUCT"],
         ["SAT_ORDER_LINE"],
     ]
+
+
+def test_parallel_execution_waves_prioritise_ready_work_and_reject_cycles():
+    assert parallel_execution_waves(
+        {"LOW": set(), "HIGH": set()}, max_parallelism=1, priorities={"LOW": 20, "HIGH": 10}
+    ) == [["HIGH"], ["LOW"]]
+
+    with pytest.raises(DependencyCycleError):
+        parallel_execution_waves({"A": {"B"}, "B": {"A"}}, max_parallelism=2)
+
+    with pytest.raises(ValueError, match="minimaal 1"):
+        parallel_execution_waves({"A": set()}, max_parallelism=0)
+
+
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def collect(self):
+        return self.rows
+
+
+class _RecordingSpark:
+    def __init__(self, rows_by_fragment=None):
+        self.rows_by_fragment = rows_by_fragment or {}
+        self.statements = []
+
+    def sql(self, statement):
+        self.statements.append(statement)
+        for fragment, rows in self.rows_by_fragment.items():
+            if fragment in statement:
+                return _Rows(rows)
+        return _Rows([])
+
+
+def _orchestrator(rows_by_fragment=None):
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "delivery_id": "SALES|2026-09-01", "batch_id": "batch-1"
+    })()
+    repo = type("Repository", (), {"dependencies_for": lambda *_args: []})()
+    return Orchestrator(_RecordingSpark(rows_by_fragment), repo, context)
+
+
+def test_orchestrator_delivery_gates_stop_incomplete_or_unknown_deliveries():
+    orchestrator = _orchestrator({
+        "v_next_processable_delivery": [type("Delivery", (), {"delivery_id": "SALES|2026-09-01", "is_ready": False})()],
+        "v_delivery_readiness": [type("Readiness", (), {"is_ready": False, "success_count": 2, "expected_object_count": 3, "failed_count": 0})()],
+    })
+
+    assert orchestrator.next_delivery("SALES") is None
+    with pytest.raises(GateNotOpenError, match="2/3 geladen"):
+        orchestrator.require_delivery_complete("SALES|2026-09-01")
+
+    with pytest.raises(GateNotOpenError, match="niet geregistreerd"):
+        _orchestrator().require_delivery_complete("SALES|2026-09-01")
+
+
+def test_orchestrator_requires_each_blocking_upstream_success():
+    dependency = type("Dependency", (), {
+        "dependency_type": "ENTITY", "depends_on_entity_id": "HUB_CUSTOMER", "depends_on_layer": "RAW_VAULT"
+    })()
+    repo = type("Repository", (), {"dependencies_for": lambda *_args: [dependency]})()
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "delivery_id": "SALES|2026-09-01", "batch_id": "batch-1"
+    })()
+    spark = _RecordingSpark({"v_load_run_status": [type("Count", (), {"n": 0})()]})
+
+    with pytest.raises(GateNotOpenError, match="RAW_VAULT.HUB_CUSTOMER"):
+        Orchestrator(spark, repo, context).require_upstream_success("SAT_CUSTOMER", "RAW_VAULT")
+
+
+def test_audit_run_records_failure_and_preserves_the_original_exception():
+    spark = _RecordingSpark({"audit_metadata_version": [type("Version", (), {"metadata_version": "metadata-v1"})()]})
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "SALES|2026-09-01",
+        "load_date_literal": "timestamp'2026-09-01 00:00:00.000'", "job_run_id": "job-1"
+    })()
+
+    with pytest.raises(ValueError, match="expected failure"):
+        with AuditLogger(spark, context).run("QUALITY", "SALES.ORDERS"):
+            raise ValueError("expected failure")
+
+    statements = "\n".join(spark.statements)
+    assert "'RUNNING'" in statements
+    assert "'FAILED'" in statements
+    assert "expected failure" in statements
+
+
+def test_metadata_validator_reports_invalid_metadata_without_stopping_at_first_issue():
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS", "bronze_table_fqn": "bronze.orders", "quality_table_fqn": "quality.orders"
+    })()
+    entity = GoldEntity(
+        gold_entity_id="GC_BAD", gold_layer="CURRENT", entity_type="DIMENSION",
+        target_table_fqn="gold.dim_bad", target_catalog="gold", target_schema="current", target_table="dim_bad",
+        select_sql="SELECT broken_column", business_key_columns=["id"], scd_type="SNAPSHOT",
+        publish_mode="ATOMIC_SWAP", publication_group_id=None, depends_on_gold_entity_ids=["GC_MISSING"], load_order=1,
+        pointer_table=None, staging_table="gold.current_internal.dim_bad",
+    )
+    repo = type("Repository", (), {
+        "source_objects": lambda *_args: (source,), "mappings": lambda *_args: [],
+        "quality_rules": lambda *_args: [], "dv_entities": lambda *_args: (),
+        "gold_entities": lambda *_args: (entity,),
+    })()
+    spark = _RecordingSpark()
+    validator = MetadataValidator(spark, repo, Settings(env="tst"))
+
+    issues = validator.validate_all()
+
+    assert {(issue.category, issue.entity) for issue in issues} >= {
+        ("MAPPING", "SALES.ORDERS"), ("GOLD", "GC_BAD"),
+    }
+    messages = " ".join(issue.message for issue in issues)
+    assert "Onbekende afhankelijkheid" in messages
+    assert "publication_group_id" in messages
+    assert "pointer_table" in messages
+    assert "staging_table" in messages
 
 
 def test_bronze_empty_landing_is_detected_before_autoloader_schema_inference():
@@ -126,6 +268,103 @@ def test_bronze_empty_landing_is_detected_before_autoloader_schema_inference():
     source = type("Source", (), {"file_pattern": "orders*.parquet"})()
 
     assert not loader.has_input_files(source, "/Volumes/raw_tst/sales/landing")
+
+
+@pytest.mark.parametrize(
+    ("strategy", "expected_match"),
+    [
+        ("INCREMENTAL_APPEND", "t._source_file_path = s._source_file_path"),
+        ("SNAPSHOT_SCD2", "t._delivery_id = s._delivery_id"),
+        ("INCREMENTAL_MERGE", "ON t.order_key <=> s.order_key"),
+    ],
+)
+def test_bronze_loader_uses_the_configured_merge_strategy(strategy, expected_match):
+    class Slice:
+        def dropDuplicates(self, columns):
+            self.dedupe_columns = columns
+            return self
+
+        def createOrReplaceTempView(self, name):
+            self.view_name = name
+
+    class RecordingSpark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+
+    loader = object.__new__(BronzeLoader)
+    loader.spark = RecordingSpark()
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS", "bronze_table_fqn": "bronze.orders",
+        "business_key_columns": ["order_key"], "load_strategy": strategy,
+    })()
+
+    slice_df = Slice()
+    loader._merge_bronze_slice(source, slice_df)
+
+    statement = loader.spark.statements[0]
+    assert "MERGE WITH SCHEMA EVOLUTION" in statement
+    assert expected_match in statement
+    assert slice_df.dedupe_columns == ["_source_file_path", "_delivery_id", "order_key"]
+
+
+def test_bronze_loader_overwrites_only_for_full_overwrite_and_rejects_unknown_strategies():
+    class Slice:
+        def dropDuplicates(self, columns):
+            self.dedupe_columns = columns
+            return self
+
+        def createOrReplaceTempView(self, _name):
+            pass
+
+    class RecordingSpark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+
+    loader = object.__new__(BronzeLoader)
+    loader.spark = RecordingSpark()
+    overwrite_source = type("Source", (), {
+        "source_object_id": "SALES.REFERENCE", "bronze_table_fqn": "bronze.reference",
+        "business_key_columns": [], "load_strategy": "FULL_OVERWRITE",
+    })()
+    loader._merge_bronze_slice(overwrite_source, Slice())
+
+    assert loader.spark.statements == [
+        "CREATE OR REPLACE TABLE bronze.reference AS SELECT * FROM _bronze_sales_reference"
+    ]
+
+    invalid_source = type("Source", (), {
+        "source_object_id": "SALES.CDC", "bronze_table_fqn": "bronze.cdc",
+        "business_key_columns": ["id"], "load_strategy": "INCREMENTAL_CDC",
+    })()
+    with pytest.raises(ValueError, match="Niet-ondersteunde load_strategy"):
+        loader._merge_bronze_slice(invalid_source, Slice())
+
+
+@pytest.mark.parametrize(
+    ("policy", "columns", "expected_error"),
+    [
+        ("RESCUE", ["new_attribute"], None),
+        ("STRICT", ["new_attribute"], "STRICT"),
+        ("ALLOW_NEW_COLUMNS_WITH_APPROVAL", ["new_attribute"], "mappinggoedkeuring"),
+        ("UNDEFINED", ["new_attribute"], "onbekend schema_drift_policy"),
+        ("STRICT", [], None),
+    ],
+)
+def test_bronze_schema_drift_policy_is_enforced_before_merge(policy, columns, expected_error):
+    loader = object.__new__(BronzeLoader)
+    source = type("Source", (), {"source_object_id": "SALES.ORDERS", "schema_drift_policy": policy})()
+
+    if expected_error:
+        with pytest.raises(SchemaDriftError, match=expected_error):
+            loader._validate_schema_drift(source, columns)
+    else:
+        loader._validate_schema_drift(source, columns)
 
 
 def test_metadata_ddl_includes_seeded_enterprise_fields():
@@ -159,6 +398,27 @@ def test_delivery_supersede_is_auditable_and_requires_approval():
     assert 'sys.path.insert(0, f"{dbutils.widgets.get(\'repo_root\')}/src")' in remediation
 
 
+def test_quarantine_release_is_auditable_and_limited_to_quarantined_deliveries():
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+    release = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "08_release_quarantined_delivery.py"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        Path(__file__).resolve().parents[1] / "workflows" / "quarantine_remediation.job.yml"
+    ).read_text(encoding="utf-8")
+
+    for field in ("quarantined_at", "quarantine_reason"):
+        assert field in audit_ddl
+    for field in ("released_at", "released_by", "release_reason", "release_approval_reference"):
+        assert field in audit_ddl
+        assert field in release
+    assert 'row.delivery_status != "QUARANTINED"' in release
+    assert "AND delivery_status = 'QUARANTINED'" in release
+    assert "release_quarantined_delivery" in workflow
+
+
 def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     workflow = PIPELINE_WORKFLOW.read_text(encoding="utf-8")
     planner = (
@@ -172,6 +432,8 @@ def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     assert "for_each_task:" in workflow
     assert "{{tasks.plan_bronze_fanout.values.bronze_inputs}}" in workflow
     assert "concurrency: ${var.bronze_parallelism}" in workflow
+    assert "name: source_system_id" in workflow
+    assert 'source_system_id: "{{job.parameters.source_system_id}}"' in workflow
     assert "currentRunId" not in planner
     assert "taskValues.set" not in bronze
 
@@ -194,6 +456,18 @@ def test_append_only_audit_event_table_has_no_column_defaults():
     event_table = event_table.split("CREATE OR REPLACE VIEW v_load_run_status", 1)[0]
 
     assert "DEFAULT" not in event_table
+
+
+def test_quarantined_deliveries_are_not_selected_by_the_next_delivery_gate():
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+    audit = (
+        Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "audit.py"
+    ).read_text(encoding="utf-8")
+
+    assert "delivery_status NOT IN ('QUARANTINED', 'SUPERSEDED')" in audit_ddl
+    assert "SET delivery_status = 'QUARANTINED'" in audit
 
 
 def test_bronze_loader_avoids_serverless_unsupported_persistence():

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS audit_delivery (
   delivery_folder       STRING    NOT NULL COMMENT 'Volledig volumepad van de datumfolder',
   expected_object_count INT       NOT NULL COMMENT 'Aantal verplichte objecten volgens metadata',
   loaded_object_count   INT       NOT NULL DEFAULT 0,
-  delivery_status       STRING    NOT NULL COMMENT 'DETECTED | IN_PROGRESS | COMPLETE | FAILED | SUPERSEDED | LATE_ARRIVAL',
+  delivery_status       STRING    NOT NULL COMMENT 'DETECTED | IN_PROGRESS | COMPLETE | FAILED | QUARANTINED | SUPERSEDED | LATE_ARRIVAL',
   delivery_sequence_number BIGINT NOT NULL
       COMMENT 'Verwerkingsvolgorde. Levering N+1 mag pas starten als N COMPLETE is.',
   first_seen_at         TIMESTAMP NOT NULL,
@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS audit_delivery (
   superseded_by         STRING,
   supersede_reason      STRING,
   supersede_approval_reference STRING,
+  quarantined_at        TIMESTAMP,
+  quarantine_reason     STRING,
+  released_at           TIMESTAMP,
+  released_by           STRING,
+  release_reason        STRING,
+  release_approval_reference STRING,
   CONSTRAINT pk_delivery PRIMARY KEY (delivery_id) RELY
 )
 USING DELTA
@@ -221,7 +227,7 @@ WITH open_deliveries AS (
   SELECT r.*, d.delivery_status
   FROM v_delivery_readiness r
   JOIN audit_delivery d USING (delivery_id)
-  WHERE d.delivery_status NOT IN ('SUPERSEDED')
+  WHERE d.delivery_status NOT IN ('QUARANTINED', 'SUPERSEDED')
     AND NOT EXISTS (
       SELECT 1 FROM v_load_run_status lr
       WHERE lr.delivery_id = r.delivery_id

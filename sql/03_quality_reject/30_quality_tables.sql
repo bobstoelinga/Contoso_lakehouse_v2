@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS qa_orders (
   order_line_number INT     NOT NULL,
   customer_key      STRING  NOT NULL,
   product_key       STRING  NOT NULL,
+  employee_key      STRING  NOT NULL,
   order_date        DATE    NOT NULL,
   ship_date         DATE,
   delivery_date     DATE,
@@ -87,4 +88,54 @@ CREATE TABLE IF NOT EXISTS qa_orders (
 USING DELTA
 PARTITIONED BY (_delivery_date)
 COMMENT 'Quality: goedgekeurde orderregels.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS qa_employees (
+  employee_key      STRING  NOT NULL,
+  first_name        STRING,
+  last_name         STRING,
+  job_title         STRING,
+  office_city       STRING,
+  hire_date         DATE,
+  is_deleted        BOOLEAN NOT NULL,
+
+  _delivery_id      STRING    NOT NULL,
+  _delivery_date    DATE      NOT NULL,
+  _batch_id         STRING    NOT NULL,
+  _record_source    STRING    NOT NULL,
+  _quality_status   STRING    NOT NULL COMMENT 'PASSED | PASSED_WITH_WARNINGS',
+  _warning_codes    ARRAY<STRING>,
+  _processed_at     TIMESTAMP NOT NULL,
+  CONSTRAINT pk_qa_employees PRIMARY KEY (employee_key, _delivery_id) RELY
+)
+USING DELTA
+PARTITIONED BY (_delivery_date)
+COMMENT 'Quality: goedgekeurde medewerkerrecords.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS qa_returns (
+  return_key         STRING  NOT NULL,
+  order_key          STRING  NOT NULL,
+  order_line_number  INT     NOT NULL,
+  product_key        STRING  NOT NULL,
+  employee_key       STRING  NOT NULL,
+  return_date        DATE    NOT NULL,
+  return_status      STRING  NOT NULL,
+  return_reason_code STRING,
+  return_quantity    INT     NOT NULL,
+  refund_amount      DECIMAL(18,4),
+  currency_code      STRING  NOT NULL,
+
+  _delivery_id      STRING    NOT NULL,
+  _delivery_date    DATE      NOT NULL,
+  _batch_id         STRING    NOT NULL,
+  _record_source    STRING    NOT NULL,
+  _quality_status   STRING    NOT NULL,
+  _warning_codes    ARRAY<STRING>,
+  _processed_at     TIMESTAMP NOT NULL,
+  CONSTRAINT pk_qa_returns PRIMARY KEY (return_key, _delivery_id) RELY
+)
+USING DELTA
+PARTITIONED BY (_delivery_date)
+COMMENT 'Quality: goedgekeurde retourregels.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);

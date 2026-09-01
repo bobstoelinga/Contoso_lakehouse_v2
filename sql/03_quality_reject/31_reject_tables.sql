@@ -46,6 +46,12 @@ ALTER TABLE rj_products SET TBLPROPERTIES (comment = 'Reject: afgekeurde product
 CREATE TABLE IF NOT EXISTS rj_orders LIKE rj_customers;
 ALTER TABLE rj_orders SET TBLPROPERTIES (comment = 'Reject: afgekeurde orderregels, herverwerkbaar.');
 
+CREATE TABLE IF NOT EXISTS rj_employees LIKE rj_customers;
+ALTER TABLE rj_employees SET TBLPROPERTIES (comment = 'Reject: afgekeurde medewerkerrecords, herverwerkbaar.');
+
+CREATE TABLE IF NOT EXISTS rj_returns LIKE rj_customers;
+ALTER TABLE rj_returns SET TBLPROPERTIES (comment = 'Reject: afgekeurde retourregels, herverwerkbaar.');
+
 -- Operationeel overzicht voor data stewards.
 CREATE OR REPLACE VIEW v_open_rejects
 COMMENT 'Alle openstaande rejects over alle bronobjecten heen.'
@@ -56,6 +62,10 @@ WITH open_rejects AS (
   SELECT * FROM rj_products WHERE reject_status = 'OPEN'
   UNION ALL
   SELECT * FROM rj_orders WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM rj_employees WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM rj_returns WHERE reject_status = 'OPEN'
 )
 SELECT source_object_id, _delivery_id, _delivery_date, r.reason_code, r.reason_text, count(*) AS reject_count
 FROM open_rejects

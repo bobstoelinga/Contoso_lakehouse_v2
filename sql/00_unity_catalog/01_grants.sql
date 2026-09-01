@@ -26,8 +26,8 @@ GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA contoso_meta_${env}.metadata TO `${da
 
 -- Analisten: uitsluitend Gold.
 GRANT USE CATALOG ON CATALOG contoso_gold_${env}                   TO `${bi_analysts_group}`;
-GRANT USE SCHEMA, SELECT ON SCHEMA contoso_gold_${env}.current     TO `${bi_analysts_group}`;
-GRANT USE SCHEMA, SELECT ON SCHEMA contoso_gold_${env}.historical  TO `${bi_analysts_group}`;
+GRANT USE SCHEMA ON SCHEMA contoso_gold_${env}.current             TO `${bi_analysts_group}`;
+GRANT USE SCHEMA ON SCHEMA contoso_gold_${env}.historical          TO `${bi_analysts_group}`;
 
 -- Reject bevat brondata: alleen data stewards.
 GRANT USE CATALOG, SELECT ON CATALOG contoso_reject_${env} TO `${data_stewards_group}`;

@@ -61,14 +61,38 @@ CLUSTER BY (product_hk)
 COMMENT 'Gold Historisch: productdimensie met volledige SCD2 historie.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
 
+CREATE TABLE IF NOT EXISTS dim_employee_hist (
+  employee_hk  STRING NOT NULL,
+  employee_key STRING NOT NULL,
+  first_name   STRING,
+  last_name    STRING,
+  job_title    STRING,
+  office_city  STRING,
+  hire_date    DATE,
+  is_deleted   BOOLEAN,
+  valid_from   TIMESTAMP NOT NULL,
+  valid_to     TIMESTAMP NOT NULL,
+  is_current   BOOLEAN NOT NULL,
+  record_source STRING NOT NULL,
+  _batch_id    STRING NOT NULL,
+  _loaded_at   TIMESTAMP NOT NULL,
+  CONSTRAINT pk_dim_employee_hist PRIMARY KEY (employee_hk, valid_from) RELY
+)
+USING DELTA
+CLUSTER BY (employee_hk)
+COMMENT 'Gold Historisch: medewerkerdimensie met volledige SCD2 historie.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
 CREATE TABLE IF NOT EXISTS fct_sales_hist (
   sales_line_hk     STRING    NOT NULL,
   order_hk          STRING    NOT NULL,
   product_hk        STRING    NOT NULL,
   customer_hk       STRING,
+  employee_hk       STRING,
   order_key         STRING    NOT NULL,
   order_line_number INT       NOT NULL,
   order_date        DATE,
+  order_date_key    INT,
   order_status      STRING,
   currency_code     STRING,
   quantity          INT,
@@ -81,6 +105,8 @@ CREATE TABLE IF NOT EXISTS fct_sales_hist (
   is_cancelled      BOOLEAN,
   ship_date         DATE,
   delivery_date     DATE,
+  ship_date_key     INT,
+  delivery_date_key INT,
   valid_from        TIMESTAMP NOT NULL,
   valid_to          TIMESTAMP NOT NULL,
   is_current        BOOLEAN   NOT NULL,
@@ -92,4 +118,34 @@ CREATE TABLE IF NOT EXISTS fct_sales_hist (
 USING DELTA
 CLUSTER BY (order_date, customer_hk, product_hk)
 COMMENT 'Gold Historisch: verkoopfeiten met volledige SCD2 historie.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS fct_returns_hist (
+  return_line_hk     STRING NOT NULL,
+  return_hk          STRING NOT NULL,
+  order_hk           STRING NOT NULL,
+  product_hk         STRING NOT NULL,
+  customer_hk        STRING,
+  employee_hk        STRING,
+  return_key         STRING NOT NULL,
+  order_key          STRING NOT NULL,
+  order_line_number  INT NOT NULL,
+  return_date        DATE,
+  return_date_key    INT,
+  return_status      STRING,
+  return_reason_code STRING,
+  return_quantity    INT,
+  refund_amount      DECIMAL(18,4),
+  currency_code      STRING,
+  valid_from         TIMESTAMP NOT NULL,
+  valid_to           TIMESTAMP NOT NULL,
+  is_current         BOOLEAN NOT NULL,
+  record_source      STRING NOT NULL,
+  _batch_id          STRING NOT NULL,
+  _loaded_at         TIMESTAMP NOT NULL,
+  CONSTRAINT pk_fct_returns_hist PRIMARY KEY (return_line_hk, valid_from) RELY
+)
+USING DELTA
+CLUSTER BY (return_date, employee_hk, product_hk)
+COMMENT 'Gold Historisch: retourfeiten met medewerker- en datumrelaties.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);

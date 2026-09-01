@@ -61,6 +61,34 @@ CLUSTER BY (hk_order)
 COMMENT 'Hub: unieke order-business keys.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
 
+CREATE TABLE IF NOT EXISTS hub_return (
+  hk_return          STRING    NOT NULL,
+  return_key         STRING    NOT NULL,
+  bk_collision_code  STRING    NOT NULL,
+  load_date          TIMESTAMP NOT NULL,
+  record_source      STRING    NOT NULL,
+  _batch_id          STRING    NOT NULL,
+  CONSTRAINT pk_hub_return PRIMARY KEY (hk_return) RELY
+)
+USING DELTA
+CLUSTER BY (hk_return)
+COMMENT 'Hub: unieke retour-business keys.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS hub_employee (
+  hk_employee        STRING    NOT NULL,
+  employee_key       STRING    NOT NULL,
+  bk_collision_code  STRING    NOT NULL,
+  load_date          TIMESTAMP NOT NULL,
+  record_source      STRING    NOT NULL,
+  _batch_id          STRING    NOT NULL,
+  CONSTRAINT pk_hub_employee PRIMARY KEY (hk_employee) RELY
+)
+USING DELTA
+CLUSTER BY (hk_employee)
+COMMENT 'Hub: unieke medewerker-business keys.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
 -- -----------------------------------------------------------------------------
 -- LINKS
 -- -----------------------------------------------------------------------------
@@ -95,6 +123,57 @@ CREATE TABLE IF NOT EXISTS lnk_order_product (
 USING DELTA
 CLUSTER BY (hk_order, hk_product)
 COMMENT 'Link: orderregel = order <-> product.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS lnk_return_order_product (
+  hk_return_order_product STRING    NOT NULL,
+  hk_return                STRING    NOT NULL,
+  hk_order                 STRING    NOT NULL,
+  hk_product               STRING    NOT NULL,
+  order_line_number        INT       NOT NULL COMMENT 'Degenerate key: verwijzing naar de oorspronkelijke orderregel',
+  load_date                TIMESTAMP NOT NULL,
+  record_source            STRING    NOT NULL,
+  _batch_id                STRING    NOT NULL,
+  CONSTRAINT pk_lnk_return_order_product PRIMARY KEY (hk_return_order_product) RELY,
+  CONSTRAINT fk_lrop_return  FOREIGN KEY (hk_return) REFERENCES hub_return(hk_return) RELY,
+  CONSTRAINT fk_lrop_order   FOREIGN KEY (hk_order) REFERENCES hub_order(hk_order) RELY,
+  CONSTRAINT fk_lrop_product FOREIGN KEY (hk_product) REFERENCES hub_product(hk_product) RELY
+)
+USING DELTA
+CLUSTER BY (hk_return, hk_order, hk_product)
+COMMENT 'Link: retourregel naar oorspronkelijke orderregel en product.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS lnk_order_employee (
+  hk_order_employee  STRING    NOT NULL,
+  hk_order           STRING    NOT NULL,
+  hk_employee        STRING    NOT NULL,
+  load_date          TIMESTAMP NOT NULL,
+  record_source      STRING    NOT NULL,
+  _batch_id          STRING    NOT NULL,
+  CONSTRAINT pk_lnk_order_employee PRIMARY KEY (hk_order_employee) RELY,
+  CONSTRAINT fk_loe_order FOREIGN KEY (hk_order) REFERENCES hub_order(hk_order) RELY,
+  CONSTRAINT fk_loe_employee FOREIGN KEY (hk_employee) REFERENCES hub_employee(hk_employee) RELY
+)
+USING DELTA
+CLUSTER BY (hk_order, hk_employee)
+COMMENT 'Link: medewerker die de verkooporder behandelde.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS lnk_return_employee (
+  hk_return_employee STRING    NOT NULL,
+  hk_return          STRING    NOT NULL,
+  hk_employee        STRING    NOT NULL,
+  load_date          TIMESTAMP NOT NULL,
+  record_source      STRING    NOT NULL,
+  _batch_id          STRING    NOT NULL,
+  CONSTRAINT pk_lnk_return_employee PRIMARY KEY (hk_return_employee) RELY,
+  CONSTRAINT fk_lre_return FOREIGN KEY (hk_return) REFERENCES hub_return(hk_return) RELY,
+  CONSTRAINT fk_lre_employee FOREIGN KEY (hk_employee) REFERENCES hub_employee(hk_employee) RELY
+)
+USING DELTA
+CLUSTER BY (hk_return, hk_employee)
+COMMENT 'Link: medewerker die de retour behandelde.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
 
 -- -----------------------------------------------------------------------------
@@ -180,6 +259,44 @@ CLUSTER BY (hk_order_product)
 COMMENT 'Link-satellite (insert-only): orderregel-attributen.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
 
+CREATE TABLE IF NOT EXISTS sat_return_h (
+  hk_return_order_product STRING    NOT NULL,
+  load_date               TIMESTAMP NOT NULL,
+  hashdiff                STRING    NOT NULL,
+  record_source           STRING    NOT NULL,
+  _batch_id               STRING    NOT NULL,
+  return_date             DATE,
+  return_status           STRING,
+  return_reason_code      STRING,
+  return_quantity         INT,
+  refund_amount           DECIMAL(18,4),
+  currency_code           STRING,
+  CONSTRAINT pk_sat_return PRIMARY KEY (hk_return_order_product, load_date) RELY
+)
+USING DELTA
+CLUSTER BY (hk_return_order_product)
+COMMENT 'Link-satellite (insert-only): retourregel-attributen.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS sat_employee_h (
+  hk_employee   STRING    NOT NULL,
+  load_date     TIMESTAMP NOT NULL,
+  hashdiff      STRING    NOT NULL,
+  record_source STRING    NOT NULL,
+  _batch_id     STRING    NOT NULL,
+  first_name    STRING,
+  last_name     STRING,
+  job_title     STRING,
+  office_city   STRING,
+  hire_date     DATE,
+  is_deleted    BOOLEAN,
+  CONSTRAINT pk_sat_employee PRIMARY KEY (hk_employee, load_date) RELY
+)
+USING DELTA
+CLUSTER BY (hk_employee)
+COMMENT 'Satellite (insert-only): beschrijvende medewerkerattributen.'
+TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
 -- -----------------------------------------------------------------------------
 -- STATUS / RECORD-TRACKING SATELLITES (delete-detectie bij snapshotbronnen)
 -- -----------------------------------------------------------------------------
@@ -239,6 +356,18 @@ SELECT *,
        lead(load_date) OVER (PARTITION BY hk_order_product ORDER BY load_date) AS load_end_date,
        lead(load_date) OVER (PARTITION BY hk_order_product ORDER BY load_date) IS NULL AS is_current
 FROM sat_order_line_h;
+
+CREATE OR REPLACE VIEW sat_return AS
+SELECT *,
+       lead(load_date) OVER (PARTITION BY hk_return_order_product ORDER BY load_date) AS load_end_date,
+       lead(load_date) OVER (PARTITION BY hk_return_order_product ORDER BY load_date) IS NULL AS is_current
+FROM sat_return_h;
+
+CREATE OR REPLACE VIEW sat_employee AS
+SELECT *,
+       lead(load_date) OVER (PARTITION BY hk_employee ORDER BY load_date) AS load_end_date,
+       lead(load_date) OVER (PARTITION BY hk_employee ORDER BY load_date) IS NULL AS is_current
+FROM sat_employee_h;
 
 CREATE OR REPLACE VIEW sat_eff_order_customer AS
 SELECT *,

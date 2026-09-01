@@ -14,6 +14,7 @@ from pyspark.sql import DataFrame, SparkSession, functions as F
 from contoso_lakehouse.audit import AuditLogger
 from contoso_lakehouse.context import RunContext
 from contoso_lakehouse.metadata import MetadataRepository, QualityRule, safe_identifier
+from contoso_lakehouse.sqlutil import sql_string
 
 
 class QualityThresholdBreached(RuntimeError):
@@ -61,6 +62,23 @@ class QualityEngine:
             if rule.is_blocking and rule.on_threshold_breach == "FAIL_BATCH"
         ]
 
+    def _clear_delivery_outputs(self, obj, delivery_id: str) -> None:
+        """Vervangt uitsluitend eerdere Quality-uitvoer van dezelfde levering."""
+        delivery = sql_string(delivery_id)
+        source_object = sql_string(obj.source_object_id)
+        self.spark.sql(
+            f"""
+            DELETE FROM {obj.quality_table_fqn}
+            WHERE _delivery_id = {delivery} AND _record_source = {source_object}
+            """
+        )
+        self.spark.sql(
+            f"""
+            DELETE FROM {obj.reject_table_fqn}
+            WHERE _delivery_id = {delivery} AND source_object_id = {source_object}
+            """
+        )
+
     # -- publieke API -----------------------------------------------------
     def run(self, source_object_id: str, delivery_id: str) -> dict[str, int]:
         obj = self.repo.source_object(source_object_id)
@@ -92,6 +110,7 @@ class QualityEngine:
                 rule.rule_name for rule in breached_rules
                 if rule.on_threshold_breach == "QUARANTINE_BATCH"
             ]
+            self._clear_delivery_outputs(obj, delivery_id)
 
             error_cols = [self._rule_column(r) for r in errors]
             passed_expr = F.lit(True)

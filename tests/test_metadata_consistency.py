@@ -34,6 +34,14 @@ METADATA_MIGRATIONS = (
 )
 PIPELINE_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "pipeline.job.yml"
 SETUP_NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / "00_setup_lakehouse.py"
+SETUP_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "setup.job.yml"
+CATALOGS_DDL = (
+    Path(__file__).resolve().parents[1] / "sql" / "00_unity_catalog" / "00_catalogs_schemas_volumes.sql"
+)
+BUNDLE_CONFIG = Path(__file__).resolve().parents[1] / "databricks.yml"
+GOLD_CONSUMER_GRANTS = (
+    Path(__file__).resolve().parents[1] / "sql" / "00_unity_catalog" / "02_gold_consumer_grants.sql"
+)
 
 
 def _seed(name: str):
@@ -214,6 +222,40 @@ def test_audit_run_records_failure_and_preserves_the_original_exception():
     assert "expected failure" in statements
 
 
+def test_audit_logger_quarantines_a_delivery_with_its_reason():
+    spark = _RecordingSpark()
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "SALES|2026-09-01",
+        "load_date_literal": "timestamp'2026-09-01 00:00:00.000'", "job_run_id": "job-1"
+    })()
+
+    AuditLogger(spark, context).quarantine_delivery("SALES|2026-09-01", "DQ threshold exceeded")
+
+    statement = spark.statements[-1]
+    assert "delivery_status = 'QUARANTINED'" in statement
+    assert "quarantine_reason = 'DQ threshold exceeded'" in statement
+    assert "delivery_id = 'SALES|2026-09-01'" in statement
+
+
+def test_quality_retries_replace_outputs_only_for_the_same_delivery_and_source_object():
+    spark = _RecordingSpark()
+    loader = object.__new__(QualityEngine)
+    loader.spark = spark
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS", "quality_table_fqn": "quality.orders",
+        "reject_table_fqn": "reject.orders",
+    })()
+
+    loader._clear_delivery_outputs(source, "SALES|2026-09-01")
+
+    statements = "\n".join(spark.statements)
+    assert "DELETE FROM quality.orders" in statements
+    assert "DELETE FROM reject.orders" in statements
+    assert "_delivery_id = 'SALES|2026-09-01'" in statements
+    assert "_record_source = 'SALES.ORDERS'" in statements
+    assert "source_object_id = 'SALES.ORDERS'" in statements
+
+
 def test_metadata_validator_reports_invalid_metadata_without_stopping_at_first_issue():
     source = type("Source", (), {
         "source_object_id": "SALES.ORDERS", "bronze_table_fqn": "bronze.orders", "quality_table_fqn": "quality.orders"
@@ -243,6 +285,50 @@ def test_metadata_validator_reports_invalid_metadata_without_stopping_at_first_i
     assert "publication_group_id" in messages
     assert "pointer_table" in messages
     assert "staging_table" in messages
+
+
+def test_historical_gold_merge_inserts_only_new_scd2_versions():
+    class NoOpContextManager:
+        def __enter__(self):
+            return {}
+
+        def __exit__(self, *_args):
+            return False
+
+    class EmptyResult:
+        def collect(self):
+            return []
+
+    class RecordingSpark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+            return EmptyResult()
+
+    entity = GoldEntity(
+        gold_entity_id="GH_TEST", gold_layer="HISTORICAL", entity_type="DIMENSION",
+        target_table_fqn="gold.historical.dim_test", target_catalog="gold", target_schema="historical",
+        target_table="dim_test", select_sql="SELECT id, valid_from FROM vault.sat_test",
+        business_key_columns=["id", "valid_from"], scd_type="SCD2", publish_mode="MERGE",
+        publication_group_id=None, depends_on_gold_entity_ids=[], load_order=1,
+        pointer_table=None, staging_table=None,
+    )
+    loader = object.__new__(GoldLoader)
+    loader.spark = RecordingSpark()
+    loader.ctx = type("Context", (), {
+        "batch_id": "batch-1", "load_date_literal": "timestamp'2026-09-01 00:00:00'"
+    })()
+    loader.audit = type("Audit", (), {
+        "run": lambda *_args: NoOpContextManager()
+    })()
+
+    loader.load_historical(entity)
+
+    statement = loader.spark.statements[0]
+    assert "WHEN NOT MATCHED THEN INSERT *" in statement
+    assert "WHEN MATCHED THEN UPDATE" not in statement
 
 
 def test_bronze_empty_landing_is_detected_before_autoloader_schema_inference():
@@ -381,6 +467,42 @@ def test_metadata_ddl_includes_seeded_enterprise_fields():
     assert "ALTER TABLE {fqn} ADD COLUMNS" in setup
 
 
+def test_landing_location_is_environment_specific_and_passed_to_setup():
+    bundle = BUNDLE_CONFIG.read_text(encoding="utf-8")
+    ddl = CATALOGS_DDL.read_text(encoding="utf-8")
+    setup_notebook = SETUP_NOTEBOOK.read_text(encoding="utf-8")
+    setup_workflow = SETUP_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "landing_path:" in bundle
+    assert "landing_path: sales/tst" in bundle
+    assert "landing_path: sales/prd" in bundle
+    assert "${landing_path}" in ddl
+    assert '"${landing_path}": landing_path' in setup_notebook
+    assert "landing_path: ${var.landing_path}" in setup_workflow
+
+
+def test_gold_consumption_requires_explicit_table_and_view_grants():
+    base_grants = (
+        Path(__file__).resolve().parents[1] / "sql" / "00_unity_catalog" / "01_grants.sql"
+    ).read_text(encoding="utf-8")
+    consumer_grants = GOLD_CONSUMER_GRANTS.read_text(encoding="utf-8")
+    setup = SETUP_NOTEBOOK.read_text(encoding="utf-8")
+
+    assert "SELECT ON SCHEMA contoso_gold_${env}" not in base_grants
+    assert "GRANT USE SCHEMA ON SCHEMA contoso_gold_${env}.current" in base_grants
+    for object_type, object_name in (
+        ("TABLE", "historical.dim_customer_hist"),
+        ("TABLE", "historical.dim_product_hist"),
+        ("TABLE", "historical.fct_sales_hist"),
+        ("VIEW", "current.dim_customer"),
+        ("VIEW", "current.dim_product"),
+        ("VIEW", "current.fct_sales"),
+        ("VIEW", "current.v_gold_freshness"),
+    ):
+        assert f"GRANT SELECT ON {object_type} contoso_gold_${{env}}.{object_name}" in consumer_grants
+    assert "02_gold_consumer_grants.sql" in setup
+
+
 def test_delivery_supersede_is_auditable_and_requires_approval():
     audit_ddl = (
         Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
@@ -444,8 +566,19 @@ def test_demo_generator_creates_files_matching_source_object_patterns():
     ).read_text(encoding="utf-8")
 
     assert "dbutils.fs.mv(part_file" in generator
-    for object_name in ("customers", "products", "orders"):
+    for object_name in ("customers", "products", "employees", "orders", "returns"):
         assert f'write_delivery_file({object_name}' in generator
+
+
+def test_demo_generator_keeps_business_dates_valid_for_future_delivery_folders():
+    generator = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "01_generate_demo_delivery.py"
+    ).read_text(encoding="utf-8")
+
+    assert "business_date = min(delivery_day, date.today()).isoformat()" in generator
+    assert '"O-3001", 1, "C-1001", "P-2001", "E-5001", business_date, business_date, business_date' in generator
+    assert '"O-3002", 1, "C-1002", "P-2002", "E-5001", business_date, None, None' in generator
+    assert '"R-4001", "O-3001", 1, "P-2001", "E-5002", business_date' in generator
 
 
 def test_append_only_audit_event_table_has_no_column_defaults():
@@ -612,6 +745,23 @@ def test_current_sales_fact_select_matches_the_gold_contract():
         "discount_rate", "lead_time_days", "is_cancelled", "ship_date", "delivery_date",
     ):
         assert column in entity["select_sql"], column
+
+
+def test_returns_employee_and_date_gold_contracts_are_complete():
+    entities = {entity["gold_entity_id"]: entity for entity in _seed("meta_gold_entity")}
+    historical_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "05_gold" / "50_gold_historical.sql"
+    ).read_text(encoding="utf-8")
+    current_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "05_gold" / "51_gold_current.sql"
+    ).read_text(encoding="utf-8")
+
+    assert {"GH_DIM_EMPLOYEE", "GH_FCT_RETURNS", "GC_DIM_EMPLOYEE", "GC_DIM_DATE", "GC_FCT_RETURNS"} <= set(entities)
+    assert "employee_hk" in entities["GC_FCT_SALES"]["select_sql"]
+    assert "order_date_key" in entities["GC_FCT_SALES"]["select_sql"]
+    assert "return_date_key" in entities["GC_FCT_RETURNS"]["select_sql"]
+    for contract in ("dim_employee_hist", "fct_returns_hist", "dim_employee_v1", "dim_date_v1", "fct_returns_v1"):
+        assert contract in historical_ddl or contract in current_ddl
 
 
 def test_atomic_swap_slot_selection_uses_configured_staging_table():

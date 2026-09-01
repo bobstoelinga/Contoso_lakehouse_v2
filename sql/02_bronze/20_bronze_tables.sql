@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS br_orders (
   order_line_number   INT,
   customer_key        STRING,
   product_key         STRING,
+  employee_key        STRING,
   order_date          DATE,
   ship_date           DATE,
   delivery_date       DATE,
@@ -55,6 +56,74 @@ TBLPROPERTIES (
   delta.columnMapping.mode            = 'name',
   delta.minReaderVersion              = '2',
   delta.minWriterVersion              = '5'
+);
+
+CREATE TABLE IF NOT EXISTS br_employees (
+  employee_key        STRING,
+  first_name          STRING,
+  last_name           STRING,
+  job_title           STRING,
+  office_city         STRING,
+  hire_date           DATE,
+  is_deleted          BOOLEAN,
+
+  _delivery_id        STRING    NOT NULL,
+  _delivery_date      DATE      NOT NULL,
+  _source_file_path   STRING    NOT NULL,
+  _source_file_name   STRING    NOT NULL,
+  _source_file_size   BIGINT,
+  _source_file_mtime  TIMESTAMP,
+  _ingest_timestamp   TIMESTAMP NOT NULL,
+  _batch_id           STRING    NOT NULL,
+  _record_source      STRING    NOT NULL,
+  _rescued_data       STRING
+)
+USING DELTA
+PARTITIONED BY (_delivery_date)
+COMMENT 'Bronze: medewerkerssnapshot per levering.'
+TBLPROPERTIES (
+  delta.enableChangeDataFeed       = true,
+  delta.autoOptimize.optimizeWrite = true,
+  delta.autoOptimize.autoCompact   = true,
+  delta.columnMapping.mode         = 'name',
+  delta.minReaderVersion           = '2',
+  delta.minWriterVersion           = '5'
+);
+
+CREATE TABLE IF NOT EXISTS br_returns (
+  return_key          STRING,
+  order_key           STRING,
+  order_line_number   INT,
+  product_key         STRING,
+  employee_key        STRING,
+  return_date         DATE,
+  return_status       STRING,
+  return_reason_code  STRING,
+  return_quantity     INT,
+  refund_amount       DECIMAL(18,4),
+  currency_code       STRING,
+
+  _delivery_id        STRING    NOT NULL,
+  _delivery_date      DATE      NOT NULL,
+  _source_file_path   STRING    NOT NULL,
+  _source_file_name   STRING    NOT NULL,
+  _source_file_size   BIGINT,
+  _source_file_mtime  TIMESTAMP,
+  _ingest_timestamp   TIMESTAMP NOT NULL,
+  _batch_id           STRING    NOT NULL,
+  _record_source      STRING    NOT NULL,
+  _rescued_data       STRING
+)
+USING DELTA
+PARTITIONED BY (_delivery_date)
+COMMENT 'Bronze: onbewerkte retourregels per levering.'
+TBLPROPERTIES (
+  delta.enableChangeDataFeed       = true,
+  delta.autoOptimize.optimizeWrite = true,
+  delta.autoOptimize.autoCompact   = true,
+  delta.columnMapping.mode         = 'name',
+  delta.minReaderVersion           = '2',
+  delta.minWriterVersion           = '5'
 );
 
 CREATE TABLE IF NOT EXISTS br_customers (

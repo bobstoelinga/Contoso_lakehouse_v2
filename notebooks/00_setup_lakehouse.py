@@ -9,6 +9,7 @@
 
 dbutils.widgets.text("env", "dev")
 dbutils.widgets.text("storage_account", "contosolake")
+dbutils.widgets.text("landing_path", "sales")
 dbutils.widgets.text("service_principal", "svc_contoso_etl")
 dbutils.widgets.text("data_engineers_group", "grp_data_engineers")
 dbutils.widgets.text("bi_analysts_group", "grp_bi_analysts")
@@ -17,6 +18,7 @@ dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2
 
 env = dbutils.widgets.get("env")
 storage_account = dbutils.widgets.get("storage_account")
+landing_path = dbutils.widgets.get("landing_path")
 service_principal = dbutils.widgets.get("service_principal")
 data_engineers_group = dbutils.widgets.get("data_engineers_group")
 bi_analysts_group = dbutils.widgets.get("bi_analysts_group")
@@ -55,11 +57,13 @@ SCRIPTS = [
     "sql/04_data_vault/41_business_vault.sql",
     "sql/05_gold/50_gold_historical.sql",
     "sql/05_gold/51_gold_current.sql",
+    "sql/00_unity_catalog/02_gold_consumer_grants.sql",
 ]
 
 PARAMS = {
     "${env}": env,
     "${storage_account}": storage_account,
+    "${landing_path}": landing_path,
     "${service_principal}": service_principal,
     "${data_engineers_group}": data_engineers_group,
     "${bi_analysts_group}": bi_analysts_group,

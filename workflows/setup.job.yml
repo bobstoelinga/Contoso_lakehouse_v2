@@ -15,6 +15,7 @@ resources:
             base_parameters:
               env: ${var.env}
               storage_account: ${var.storage_account}
+              landing_path: ${var.landing_path}
               service_principal: ${var.service_principal}
               data_engineers_group: ${var.data_engineers_group}
               bi_analysts_group: ${var.bi_analysts_group}

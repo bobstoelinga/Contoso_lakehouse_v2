@@ -23,6 +23,22 @@
     "is_multi_active": false, "multi_active_key": null,
     "record_source_expr": "'SALES.ORDERS'", "load_order": 10, "is_active": true
   },
+  {
+    "dv_entity_id": "HUB_RETURN", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_return",
+    "hash_key_column": "hk_return", "parent_entity_ids": null,
+    "business_key_columns": ["return_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.RETURNS'", "load_order": 10, "is_active": true
+  },
+  {
+    "dv_entity_id": "HUB_EMPLOYEE", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_employee",
+    "hash_key_column": "hk_employee", "parent_entity_ids": null,
+    "business_key_columns": ["employee_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.EMPLOYEES'", "load_order": 10, "is_active": true
+  },
 
   {
     "dv_entity_id": "LNK_ORDER_CUSTOMER", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
@@ -39,6 +55,30 @@
     "business_key_columns": ["order_key", "order_line_number", "product_key"], "hashdiff_column": null,
     "is_multi_active": false, "multi_active_key": null,
     "record_source_expr": "'SALES.ORDERS'", "load_order": 20, "is_active": true
+  },
+  {
+    "dv_entity_id": "LNK_RETURN_ORDER_PRODUCT", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "lnk_return_order_product",
+    "hash_key_column": "hk_return_order_product", "parent_entity_ids": ["HUB_RETURN", "HUB_ORDER", "HUB_PRODUCT"],
+    "business_key_columns": ["return_key", "order_key", "order_line_number", "product_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.RETURNS'", "load_order": 20, "is_active": true
+  },
+  {
+    "dv_entity_id": "LNK_ORDER_EMPLOYEE", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "lnk_order_employee",
+    "hash_key_column": "hk_order_employee", "parent_entity_ids": ["HUB_ORDER", "HUB_EMPLOYEE"],
+    "business_key_columns": ["order_key", "employee_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.ORDERS'", "load_order": 20, "is_active": true
+  },
+  {
+    "dv_entity_id": "LNK_RETURN_EMPLOYEE", "dv_entity_type": "LINK", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "lnk_return_employee",
+    "hash_key_column": "hk_return_employee", "parent_entity_ids": ["HUB_RETURN", "HUB_EMPLOYEE"],
+    "business_key_columns": ["return_key", "employee_key"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.RETURNS'", "load_order": 20, "is_active": true
   },
 
   {
@@ -72,6 +112,22 @@
     "business_key_columns": null, "hashdiff_column": "hashdiff",
     "is_multi_active": false, "multi_active_key": null,
     "record_source_expr": "'SALES.ORDERS'", "load_order": 40, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_RETURN", "dv_entity_type": "LINK_SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_return",
+    "hash_key_column": "hk_return_order_product", "parent_entity_ids": ["LNK_RETURN_ORDER_PRODUCT"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.RETURNS'", "load_order": 40, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_EMPLOYEE", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_employee",
+    "hash_key_column": "hk_employee", "parent_entity_ids": ["HUB_EMPLOYEE"],
+    "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null,
+    "record_source_expr": "'SALES.EMPLOYEES'", "load_order": 30, "is_active": true
   },
 
   {

@@ -74,14 +74,19 @@ flowchart LR
 pytest -q
 
 # 1. Unity Catalog + metadata objecten
-databricks bundle deploy -t dev
+databricks bundle deploy -t dev --profile contoso-dev
 
 # 2. Eenmalige setup + metadata seed
-databricks bundle run setup_lakehouse -t dev
+databricks bundle run setup_lakehouse -t dev --profile contoso-dev
 
 # 3. Continue pipeline
-databricks bundle run contoso_lakehouse_pipeline -t dev
+databricks bundle run contoso_lakehouse_pipeline -t dev --profile contoso-dev
 ```
+
+De targets delen één Databricks-workspace, maar hebben eigen catalogi, landing
+volumes en bundle-paden. `tst` en `prd` worden uitsluitend vanuit CI/CD met de
+service principal gedeployed. Zie [docs/00_besluitenlog.md](docs/00_besluitenlog.md)
+voor de promotievoorwaarden en autorisatietests.
 
 Zie [docs/05_workflow_design.md](docs/05_workflow_design.md) voor de orchestratie
 en [docs/00_besluitenlog.md](docs/00_besluitenlog.md) voor de onderbouwing van de

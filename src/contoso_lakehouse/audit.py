@@ -140,8 +140,8 @@ class AuditLogger:
             """
         )
 
-        def quarantine_delivery(self, delivery_id: str, reason: str) -> None:
-          self.spark.sql(
+    def quarantine_delivery(self, delivery_id: str, reason: str) -> None:
+        self.spark.sql(
             f"""
             UPDATE {self.audit}.audit_delivery
             SET delivery_status = 'QUARANTINED',
@@ -149,7 +149,7 @@ class AuditLogger:
               quarantine_reason = {_sql_str(reason)}
             WHERE delivery_id = {_sql_str(delivery_id)}
             """
-          )
+        )
 
     # -- kwaliteit --------------------------------------------------------
     def log_dq_result(self, run_id: str, source_object_id: str, rule, evaluated: int,

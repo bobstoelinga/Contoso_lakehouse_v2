@@ -118,5 +118,69 @@
     "owner_team": "sales_domain",
     "criticality": "HIGH",
     "is_active": true
+  },
+  {
+    "source_object_id": "SALES.RETURNS",
+    "source_system_id": "SALES",
+    "object_name": "returns",
+    "file_pattern": "returns*.parquet",
+    "file_format": "parquet",
+    "reader_options": { "mergeSchema": "true" },
+
+    "load_strategy": "INCREMENTAL_APPEND",
+    "business_key_columns": ["return_key"],
+    "change_tracking_columns": [
+      "return_date", "return_status", "return_reason_code", "return_quantity",
+      "refund_amount", "currency_code"
+    ],
+    "deleted_flag_column": null,
+    "is_mandatory_in_delivery": true,
+
+    "bronze_catalog": "contoso_bronze_${env}",
+    "bronze_schema": "sales",
+    "bronze_table": "br_returns",
+    "bronze_partition_columns": ["_delivery_date"],
+
+    "checkpoint_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_returns/_checkpoint",
+    "schema_location_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_returns/_schema",
+    "schema_evolution_mode": "addNewColumns",
+    "max_files_per_trigger": 1000,
+
+    "quality_catalog": "contoso_quality_${env}",
+    "quality_schema": "sales",
+    "quality_table": "qa_returns",
+    "reject_catalog": "contoso_reject_${env}",
+    "reject_schema": "sales",
+    "reject_table": "rj_returns",
+
+    "load_order": 40,
+    "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "owner_team": "sales_domain",
+    "criticality": "HIGH",
+    "is_active": true
+  },
+  {
+    "source_object_id": "SALES.EMPLOYEES",
+    "source_system_id": "SALES",
+    "object_name": "employees",
+    "file_pattern": "employees*.parquet",
+    "file_format": "parquet",
+    "reader_options": { "mergeSchema": "true" },
+
+    "load_strategy": "SNAPSHOT_SCD2",
+    "business_key_columns": ["employee_key"],
+    "change_tracking_columns": ["first_name", "last_name", "job_title", "office_city", "hire_date"],
+    "deleted_flag_column": "is_deleted",
+    "is_mandatory_in_delivery": true,
+
+    "bronze_catalog": "contoso_bronze_${env}", "bronze_schema": "sales", "bronze_table": "br_employees",
+    "bronze_partition_columns": ["_delivery_date"],
+    "checkpoint_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_employees/_checkpoint",
+    "schema_location_path": "/Volumes/raw_${env}/sales/checkpoints/bronze/br_employees/_schema",
+    "schema_evolution_mode": "addNewColumns", "max_files_per_trigger": 1000,
+    "quality_catalog": "contoso_quality_${env}", "quality_schema": "sales", "quality_table": "qa_employees",
+    "reject_catalog": "contoso_reject_${env}", "reject_schema": "sales", "reject_table": "rj_employees",
+    "load_order": 25, "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "owner_team": "sales_domain", "criticality": "HIGH", "is_active": true
   }
 ]

@@ -52,18 +52,31 @@ De datumfolder is de enige bron van de `delivery_id` (`SALES|2026-08-30`) en van
 `delivery_sequence_number`. Bestanden worden herkend via
 `meta_source_object.file_pattern`.
 
+De omgevingen kunnen dezelfde Databricks-workspace delen. Unity Catalog vormt
+de autorisatiegrens: catalogrechten scheiden `dev`, `tst` en `prd`,
+schemarechten begrenzen de functionele laag en Gold-tabel/viewrechten bepalen
+welke datamarts consumers mogen lezen. Een gedeelde runtime- of
+deploymentidentity is toegestaan als beheerde uitzondering; de grants zelf
+bepalen dan de effectieve toegang. De external-volume-locatie is aanvullend
+per target gescheiden: `dev` gebruikt `sales`, `tst` `sales/tst` en `prd`
+`sales/prd`.
+
 ## Rechtenmodel
 
 | Principal | Rechten |
 |---|---|
 | `svc_contoso_etl` (service principal) | `ALL PRIVILEGES` op alle verwerkingscatalogs; `READ VOLUME` op landing, `WRITE VOLUME` op checkpoints/quarantine |
 | `grp_data_engineers` | `SELECT` op alle lagen; `MODIFY` op de metadata **alleen in dev** |
-| `grp_bi_analysts` | `SELECT` uitsluitend op `contoso_gold_<env>.current` en `.historical` |
+| `grp_bi_analysts` | `USE` op Gold-catalog en -schema; `SELECT` alleen op expliciet toegekende historische tabellen en publieke actuele views |
 | `grp_data_stewards` | `SELECT` op de reject-catalog (bevat brondata) |
 
 In `tst` en `prd` heeft niemand `MODIFY` op `contoso_meta_*.metadata`: metadata
 wordt uitsluitend via Git en de Asset Bundle gedeployed. Zie besluit B-10 in
 [00_besluitenlog.md](00_besluitenlog.md).
+
+`current_internal` is nooit toegankelijk voor BI. Alleen de publieke views in
+`current` vormen het actuele-datamartcontract; de expliciete grants staan in
+[02_gold_consumer_grants.sql](../sql/00_unity_catalog/02_gold_consumer_grants.sql).
 
 ## Naamgevingsconventies
 

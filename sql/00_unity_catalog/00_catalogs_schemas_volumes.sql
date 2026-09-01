@@ -16,7 +16,7 @@ CREATE SCHEMA IF NOT EXISTS raw_${env}.sales
 -- Externe volume: bestanden worden door het bronsysteem aangeleverd.
 -- Folderconventie: /Volumes/raw_${env}/sales/landing/<yyyy-MM-dd>/<object>.parquet
 CREATE EXTERNAL VOLUME IF NOT EXISTS raw_${env}.sales.landing
-  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/sales'
+  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/${landing_path}'
   COMMENT 'Landing volume voor het bronsysteem SALES. Eén datumfolder = één levering.';
 
 -- Interne volume voor Auto Loader checkpoints en schema locations.

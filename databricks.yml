@@ -12,6 +12,9 @@ variables:
   storage_account:
     description: Storage account met het landing volume
     default: contosolake3
+  landing_path:
+    description: Omgevingsspecifiek pad binnen de landingcontainer
+    default: sales
   source_system_id:
     description: Bronsysteem dat door de pipeline wordt verwerkt
     default: SALES
@@ -42,6 +45,7 @@ targets:
       host: https://adb-7405619535862062.2.azuredatabricks.net/
     variables:
       env: dev
+      landing_path: sales
       data_engineers_group: stoelingabob@gmail.com
       bi_analysts_group: stoelingabob@gmail.com
       data_stewards_group: stoelingabob@gmail.com
@@ -53,6 +57,7 @@ targets:
       root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       env: tst
+      landing_path: sales/tst
     run_as:
       service_principal_name: ${var.service_principal}
 
@@ -63,6 +68,7 @@ targets:
       root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
     variables:
       env: prd
+      landing_path: sales/prd
     run_as:
       service_principal_name: ${var.service_principal}
     permissions:

@@ -39,7 +39,6 @@ class GoldLoader:
               SELECT *, '{self.ctx.batch_id}' AS _batch_id, current_timestamp() AS _loaded_at
               FROM ({entity.select_sql})
             ) s ON {on_clause}
-            WHEN MATCHED THEN UPDATE SET *
             WHEN NOT MATCHED THEN INSERT *
             """
             rows = self._execute(sql)

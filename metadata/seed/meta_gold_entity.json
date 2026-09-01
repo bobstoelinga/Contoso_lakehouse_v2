@@ -34,13 +34,20 @@
     "is_active": true
   },
   {
+    "gold_entity_id": "GH_DIM_EMPLOYEE", "gold_layer": "HISTORICAL", "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "dim_employee_hist",
+    "select_sql": "SELECT h.hk_employee AS employee_hk, h.employee_key, s.first_name, s.last_name, s.job_title, s.office_city, s.hire_date, s.is_deleted, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_employee h JOIN {vault_catalog}.raw_vault.sat_employee s ON s.hk_employee = h.hk_employee",
+    "business_key_columns": ["employee_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["employee_hk"],
+    "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+  },
+  {
     "gold_entity_id": "GH_FCT_SALES",
     "gold_layer": "HISTORICAL",
     "entity_type": "FACT",
     "target_catalog": "contoso_gold_${env}",
     "target_schema": "historical",
     "target_table": "fct_sales_hist",
-    "select_sql": "SELECT lop.hk_order_product AS sales_line_hk, lop.hk_order AS order_hk, lop.hk_product AS product_hk, loc.hk_customer AS customer_hk, ho.order_key, lop.order_line_number, so.order_date, so.order_status, so.currency_code, sol.quantity, sol.unit_price, sol.discount_amount, bv.gross_amount, bv.net_amount_calc AS net_amount, bv.discount_rate, bv.lead_time_days, bv.is_cancelled, sol.ship_date, sol.delivery_date, sol.load_date AS valid_from, coalesce(sol.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, sol.is_current, sol.record_source FROM {vault_catalog}.raw_vault.lnk_order_product lop JOIN {vault_catalog}.raw_vault.hub_order ho ON ho.hk_order = lop.hk_order JOIN {vault_catalog}.raw_vault.sat_order_line sol ON sol.hk_order_product = lop.hk_order_product LEFT JOIN {vault_catalog}.business_vault.sat_order_line_bv bv ON bv.hk_order_product = lop.hk_order_product AND bv.is_current LEFT JOIN {vault_catalog}.raw_vault.sat_order so ON so.hk_order = lop.hk_order AND so.is_current LEFT JOIN {vault_catalog}.raw_vault.lnk_order_customer loc ON loc.hk_order = lop.hk_order",
+    "select_sql": "SELECT lop.hk_order_product AS sales_line_hk, lop.hk_order AS order_hk, lop.hk_product AS product_hk, loc.hk_customer AS customer_hk, loe.hk_employee AS employee_hk, ho.order_key, lop.order_line_number, so.order_date, cast(date_format(so.order_date, 'yyyyMMdd') AS INT) AS order_date_key, so.order_status, so.currency_code, sol.quantity, sol.unit_price, sol.discount_amount, bv.gross_amount, bv.net_amount_calc AS net_amount, bv.discount_rate, bv.lead_time_days, bv.is_cancelled, sol.ship_date, sol.delivery_date, cast(date_format(sol.ship_date, 'yyyyMMdd') AS INT) AS ship_date_key, cast(date_format(sol.delivery_date, 'yyyyMMdd') AS INT) AS delivery_date_key, sol.load_date AS valid_from, coalesce(sol.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, sol.is_current, sol.record_source FROM {vault_catalog}.raw_vault.lnk_order_product lop JOIN {vault_catalog}.raw_vault.hub_order ho ON ho.hk_order = lop.hk_order JOIN {vault_catalog}.raw_vault.sat_order_line sol ON sol.hk_order_product = lop.hk_order_product LEFT JOIN {vault_catalog}.business_vault.sat_order_line_bv bv ON bv.hk_order_product = lop.hk_order_product AND bv.is_current LEFT JOIN {vault_catalog}.raw_vault.sat_order so ON so.hk_order = lop.hk_order AND so.is_current LEFT JOIN {vault_catalog}.raw_vault.lnk_order_customer loc ON loc.hk_order = lop.hk_order LEFT JOIN {vault_catalog}.raw_vault.lnk_order_employee loe ON loe.hk_order = lop.hk_order",
     "business_key_columns": ["sales_line_hk", "valid_from"],
     "scd_type": "SCD2",
     "partition_columns": ["order_date"],
@@ -49,6 +56,13 @@
     "publish_mode": "MERGE",
     "load_order": 20,
     "is_active": true
+  },
+  {
+    "gold_entity_id": "GH_FCT_RETURNS", "gold_layer": "HISTORICAL", "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "fct_returns_hist",
+    "select_sql": "SELECT lrop.hk_return_order_product AS return_line_hk, lrop.hk_return AS return_hk, lrop.hk_order AS order_hk, lrop.hk_product AS product_hk, loc.hk_customer AS customer_hk, lre.hk_employee AS employee_hk, hr.return_key, ho.order_key, lrop.order_line_number, sr.return_date, cast(date_format(sr.return_date, 'yyyyMMdd') AS INT) AS return_date_key, sr.return_status, sr.return_reason_code, sr.return_quantity, sr.refund_amount, sr.currency_code, sr.load_date AS valid_from, coalesce(sr.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, sr.is_current, sr.record_source FROM {vault_catalog}.raw_vault.lnk_return_order_product lrop JOIN {vault_catalog}.raw_vault.hub_return hr ON hr.hk_return = lrop.hk_return JOIN {vault_catalog}.raw_vault.hub_order ho ON ho.hk_order = lrop.hk_order JOIN {vault_catalog}.raw_vault.sat_return sr ON sr.hk_return_order_product = lrop.hk_return_order_product LEFT JOIN {vault_catalog}.raw_vault.lnk_order_customer loc ON loc.hk_order = lrop.hk_order LEFT JOIN {vault_catalog}.raw_vault.lnk_return_employee lre ON lre.hk_return = lrop.hk_return",
+    "business_key_columns": ["return_line_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": ["return_date"], "zorder_columns": ["employee_hk", "product_hk"],
+    "depends_on_gold_entity_ids": ["GH_DIM_CUSTOMER", "GH_DIM_PRODUCT", "GH_DIM_EMPLOYEE"], "publish_mode": "MERGE", "load_order": 20, "is_active": true
   },
 
   {
@@ -94,18 +108,32 @@
     "is_active": true
   },
   {
+    "gold_entity_id": "GC_DIM_EMPLOYEE", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_employee",
+    "select_sql": "SELECT employee_hk, employee_key, first_name, last_name, job_title, office_city, hire_date, valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_employee_hist WHERE is_current AND NOT is_deleted",
+    "business_key_columns": ["employee_hk"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["employee_hk"], "depends_on_gold_entity_ids": ["GH_DIM_EMPLOYEE"],
+    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_employee", "staging_table": "contoso_gold_${env}.current_internal.dim_employee_v2", "load_order": 30, "is_active": true
+  },
+  {
+    "gold_entity_id": "GC_DIM_DATE", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_date",
+    "select_sql": "SELECT cast(date_format(calendar_date, 'yyyyMMdd') AS INT) AS date_key, calendar_date, year(calendar_date) AS calendar_year, quarter(calendar_date) AS calendar_quarter, month(calendar_date) AS month_number, date_format(calendar_date, 'MMMM') AS month_name, weekofyear(calendar_date) AS week_number, dayofmonth(calendar_date) AS day_of_month, dayofweek(calendar_date) AS day_of_week, date_format(calendar_date, 'EEEE') AS day_name, dayofweek(calendar_date) IN (1, 7) AS is_weekend FROM (SELECT explode(sequence(date'2020-01-01', date'2030-12-31', interval 1 day)) AS calendar_date)",
+    "business_key_columns": ["date_key"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["date_key"], "depends_on_gold_entity_ids": null,
+    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_date", "staging_table": "contoso_gold_${env}.current_internal.dim_date_v2", "load_order": 30, "is_active": true
+  },
+  {
     "gold_entity_id": "GC_FCT_SALES",
     "gold_layer": "CURRENT",
     "entity_type": "FACT",
     "target_catalog": "contoso_gold_${env}",
     "target_schema": "current",
     "target_table": "fct_sales",
-    "select_sql": "SELECT sales_line_hk, order_hk, product_hk, customer_hk, order_key, order_line_number, order_date, order_status, currency_code, quantity, unit_price, discount_amount, gross_amount, net_amount, discount_rate, lead_time_days, is_cancelled, ship_date, delivery_date FROM {gold_catalog}.historical.fct_sales_hist WHERE is_current AND NOT coalesce(is_cancelled, false)",
+    "select_sql": "SELECT sales_line_hk, order_hk, product_hk, customer_hk, employee_hk, order_key, order_line_number, order_date, order_date_key, order_status, currency_code, quantity, unit_price, discount_amount, gross_amount, net_amount, discount_rate, lead_time_days, is_cancelled, ship_date, delivery_date, ship_date_key, delivery_date_key FROM {gold_catalog}.historical.fct_sales_hist WHERE is_current AND NOT coalesce(is_cancelled, false)",
     "business_key_columns": ["sales_line_hk"],
     "scd_type": "SNAPSHOT",
     "partition_columns": ["order_date"],
     "zorder_columns": ["customer_hk", "product_hk"],
-    "depends_on_gold_entity_ids": ["GH_FCT_SALES", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT"],
+    "depends_on_gold_entity_ids": ["GH_FCT_SALES", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT", "GC_DIM_EMPLOYEE", "GC_DIM_DATE"],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
     "publish_status": "READY",
@@ -113,5 +141,13 @@
     "staging_table": "contoso_gold_${env}.current_internal.fct_sales_v2",
     "load_order": 40,
     "is_active": true
+  },
+  {
+    "gold_entity_id": "GC_FCT_RETURNS", "gold_layer": "CURRENT", "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "fct_returns",
+    "select_sql": "SELECT return_line_hk, return_hk, order_hk, product_hk, customer_hk, employee_hk, return_key, order_key, order_line_number, return_date, return_date_key, return_status, return_reason_code, return_quantity, refund_amount, currency_code FROM {gold_catalog}.historical.fct_returns_hist WHERE is_current",
+    "business_key_columns": ["return_line_hk"], "scd_type": "SNAPSHOT", "partition_columns": ["return_date"], "zorder_columns": ["employee_hk", "product_hk"],
+    "depends_on_gold_entity_ids": ["GH_FCT_RETURNS", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT", "GC_DIM_EMPLOYEE", "GC_DIM_DATE"],
+    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.fct_returns", "staging_table": "contoso_gold_${env}.current_internal.fct_returns_v2", "load_order": 40, "is_active": true
   }
 ]

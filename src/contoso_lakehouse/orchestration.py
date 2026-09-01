@@ -23,6 +23,34 @@ class GateNotOpenError(RuntimeError):
     """Een blokkerende voorwaarde is nog niet vervuld."""
 
 
+def parallel_execution_waves(
+    dependencies: dict[str, set[str]], max_parallelism: int, priorities: dict[str, int] | None = None,
+) -> list[list[str]]:
+    """Deelt een DAG op in begrensde, veilig parallel uit te voeren waves."""
+    if max_parallelism < 1:
+        raise ValueError("max_parallelism moet minimaal 1 zijn.")
+    priorities = priorities or {}
+    remaining = {node: set(parents) for node, parents in dependencies.items()}
+    waves: list[list[str]] = []
+    completed: set[str] = set()
+    while remaining:
+        ready = sorted(
+            (node for node, parents in remaining.items() if parents <= completed),
+            key=lambda node: (priorities.get(node, 100), node),
+        )
+        if not ready:
+            raise DependencyCycleError(
+                f"Cyclus in parallelle uitvoerplanning: {sorted(remaining)}"
+            )
+        for start in range(0, len(ready), max_parallelism):
+            wave = ready[start:start + max_parallelism]
+            waves.append(wave)
+            completed.update(wave)
+            for node in wave:
+                del remaining[node]
+    return waves
+
+
 class Orchestrator:
     def __init__(self, spark: SparkSession, repo: MetadataRepository, ctx: RunContext) -> None:
         self.spark = spark
@@ -72,7 +100,7 @@ class Orchestrator:
                 continue
             ok = self.spark.sql(
                 f"""
-                SELECT count(*) AS n FROM {self.audit_schema}.audit_load_run
+                SELECT count(*) AS n FROM {self.audit_schema}.v_load_run_status
                 WHERE batch_id = '{self.ctx.batch_id}'
                   AND entity_id = '{dep.depends_on_entity_id}'
                   AND layer     = '{dep.depends_on_layer}'
@@ -114,6 +142,22 @@ class Orchestrator:
                 f"Cyclus in de afhankelijkheden van laag {layer}: {sorted(nodes - set(order))}"
             )
         return order
+
+    def execution_waves(
+        self, layer: str, entity_ids: set[str], max_parallelism: int,
+    ) -> list[list[str]]:
+        """Plant alleen intra-layer afhankelijkheden; externe gates blijven runtimechecks."""
+        dependencies = {entity_id: set() for entity_id in entity_ids}
+        priorities: dict[str, int] = {}
+        for dep in self.repo.dependencies():
+            if dep.entity_layer != layer or dep.entity_id not in entity_ids:
+                continue
+            priorities[dep.entity_id] = min(
+                priorities.get(dep.entity_id, 100), getattr(dep, "priority", 100)
+            )
+            if dep.depends_on_layer == layer and dep.depends_on_entity_id in entity_ids:
+                dependencies[dep.entity_id].add(dep.depends_on_entity_id)
+        return parallel_execution_waves(dependencies, max_parallelism, priorities)
 
     def validate_graph(self) -> None:
         """Controleert de volledige graaf op cycli en wees-verwijzingen."""

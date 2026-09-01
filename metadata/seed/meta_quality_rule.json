@@ -11,6 +11,8 @@
     "reject_reason_text": "Business key customer_key ontbreekt.",
     "execution_order": 10,
     "threshold_pct": 0.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -25,6 +27,8 @@
     "reject_reason_text": "Dubbele customer_key binnen dezelfde levering.",
     "execution_order": 20,
     "threshold_pct": 1.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -39,6 +43,8 @@
     "reject_reason_text": "E-mailadres heeft geen geldig formaat.",
     "execution_order": 30,
     "threshold_pct": 10.0,
+    "is_blocking": false,
+    "rule_group": "OBSERVABILITY",
     "is_active": true
   },
   {
@@ -53,6 +59,8 @@
     "reject_reason_text": "Onbekend klantsegment.",
     "execution_order": 40,
     "threshold_pct": 5.0,
+    "is_blocking": false,
+    "rule_group": "OBSERVABILITY",
     "is_active": true
   },
 
@@ -68,6 +76,8 @@
     "reject_reason_text": "Business key product_key ontbreekt.",
     "execution_order": 10,
     "threshold_pct": 0.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -82,6 +92,8 @@
     "reject_reason_text": "unit_price is negatief of leeg.",
     "execution_order": 20,
     "threshold_pct": 2.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -96,6 +108,8 @@
     "reject_reason_text": "Verkoopprijs ligt onder de kostprijs.",
     "execution_order": 30,
     "threshold_pct": 15.0,
+    "is_blocking": false,
+    "rule_group": "BUSINESS_RULES",
     "is_active": true
   },
 
@@ -111,6 +125,8 @@
     "reject_reason_text": "Business key order_key/order_line_number ontbreekt.",
     "execution_order": 10,
     "threshold_pct": 0.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -125,6 +141,8 @@
     "reject_reason_text": "Dubbele orderregel binnen dezelfde levering.",
     "execution_order": 20,
     "threshold_pct": 0.5,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -133,12 +151,14 @@
     "rule_name": "customer_exists",
     "rule_type": "REFERENTIAL",
     "target_columns": ["customer_key"],
-    "rule_expression": "customer_key IN (SELECT customer_key FROM {quality_catalog}.{quality_schema}.qa_customers)",
+    "rule_expression": "customer_key IN (SELECT customer_key FROM {quality_catalog}.sales.qa_customers)",
     "severity": "ERROR",
     "reject_reason_code": "R020",
     "reject_reason_text": "Order verwijst naar een onbekende klant.",
     "execution_order": 30,
     "threshold_pct": 1.0,
+    "is_blocking": true,
+    "rule_group": "REFERENCE_INTEGRITY",
     "is_active": true
   },
   {
@@ -147,12 +167,14 @@
     "rule_name": "product_exists",
     "rule_type": "REFERENTIAL",
     "target_columns": ["product_key"],
-    "rule_expression": "product_key IN (SELECT product_key FROM {quality_catalog}.{quality_schema}.qa_products)",
+    "rule_expression": "product_key IN (SELECT product_key FROM {quality_catalog}.sales.qa_products)",
     "severity": "ERROR",
     "reject_reason_code": "R021",
     "reject_reason_text": "Order verwijst naar een onbekend product.",
     "execution_order": 40,
     "threshold_pct": 1.0,
+    "is_blocking": true,
+    "rule_group": "REFERENCE_INTEGRITY",
     "is_active": true
   },
   {
@@ -167,6 +189,8 @@
     "reject_reason_text": "Aantal moet groter dan nul zijn.",
     "execution_order": 50,
     "threshold_pct": 2.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -181,6 +205,8 @@
     "reject_reason_text": "net_amount sluit niet aan op quantity * unit_price - discount.",
     "execution_order": 60,
     "threshold_pct": 5.0,
+    "is_blocking": false,
+    "rule_group": "BUSINESS_RULES",
     "is_active": true
   },
   {
@@ -195,6 +221,8 @@
     "reject_reason_text": "Orderdatum ligt in de toekomst of ontbreekt.",
     "execution_order": 70,
     "threshold_pct": 1.0,
+    "is_blocking": true,
+    "rule_group": "CORE_VALIDATION",
     "is_active": true
   },
   {
@@ -209,6 +237,8 @@
     "reject_reason_text": "Verzenddatum ligt voor de orderdatum.",
     "execution_order": 80,
     "threshold_pct": 5.0,
+    "is_blocking": false,
+    "rule_group": "BUSINESS_RULES",
     "is_active": true
   }
 ]

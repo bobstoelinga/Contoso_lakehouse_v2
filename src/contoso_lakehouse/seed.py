@@ -7,6 +7,7 @@ alleen deze loader (draaiend als service principal) schrijft ze.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -37,14 +38,24 @@ _KEY_COLUMNS = {
 }
 
 
+def metadata_version(records_by_table: dict[str, list[dict]]) -> str:
+    """Geeft een stabiele SHA-256-versie van de volledige metadatarelease."""
+    payload = json.dumps(records_by_table, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def load_seed(spark: SparkSession, settings: Settings, seed_dir: str) -> dict[str, int]:
     """Synchroniseert de metadatatabellen met de seed-bestanden."""
     target_schema = f"{settings.meta_catalog}.metadata"
     counts: dict[str, int] = {}
+    seed_records = {
+        table: json.loads((Path(seed_dir) / filename).read_text(encoding="utf-8"))
+        for table, filename in _SEED_FILES.items()
+    }
+    version = metadata_version(seed_records)
 
     for table, filename in _SEED_FILES.items():
-        path = Path(seed_dir) / filename
-        records = json.loads(path.read_text(encoding="utf-8"))
+        records = seed_records[table]
         if not records:
             continue
 
@@ -70,6 +81,15 @@ def load_seed(spark: SparkSession, settings: Settings, seed_dir: str) -> dict[st
             """
         )
         counts[table] = len(records)
+    spark.sql(
+        f"""
+        MERGE INTO {settings.meta_catalog}.audit.audit_metadata_version t
+        USING (SELECT '{version}' AS metadata_version) s
+          ON t.metadata_version = s.metadata_version
+        WHEN NOT MATCHED THEN INSERT (metadata_version, deployed_at)
+        VALUES (s.metadata_version, current_timestamp())
+        """
+    )
     return counts
 
 

@@ -95,21 +95,86 @@ COMMENT 'Gold Actueel slot 1 voor fct_sales.';
 CREATE TABLE IF NOT EXISTS fct_sales_v2 LIKE fct_sales_v1;
 
 -- -----------------------------------------------------------------------------
--- Publieke views (de pointer). Alleen deze objecten zijn zichtbaar voor BI.
+-- Publieke views. Alleen deze objecten zijn zichtbaar voor BI.
+-- De groepsreleasepointer wordt in één Delta MERGE bijgewerkt; zo zien alle
+-- views binnen SALES_MART steeds dezelfde batch, zonder per-view DDL-switch.
 -- -----------------------------------------------------------------------------
 USE SCHEMA current;
 
 CREATE OR REPLACE VIEW dim_customer
 COMMENT 'Gold Actueel: klantdimensie van de laatste succesvolle business load.'
-AS SELECT * FROM contoso_gold_${env}.current_internal.dim_customer_v1;
+AS
+SELECT * FROM contoso_gold_${env}.current_internal.dim_customer_v1
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_CUSTOMER'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'dim_customer_v1'
+)
+UNION ALL
+SELECT * FROM contoso_gold_${env}.current_internal.dim_customer_v2
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_CUSTOMER'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'dim_customer_v2'
+);
 
 CREATE OR REPLACE VIEW dim_product
 COMMENT 'Gold Actueel: productdimensie van de laatste succesvolle business load.'
-AS SELECT * FROM contoso_gold_${env}.current_internal.dim_product_v1;
+AS
+SELECT * FROM contoso_gold_${env}.current_internal.dim_product_v1
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_PRODUCT'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'dim_product_v1'
+)
+UNION ALL
+SELECT * FROM contoso_gold_${env}.current_internal.dim_product_v2
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_PRODUCT'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'dim_product_v2'
+);
 
 CREATE OR REPLACE VIEW fct_sales
 COMMENT 'Gold Actueel: verkoopfeiten van de laatste succesvolle business load.'
-AS SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_v1;
+AS
+SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_v1
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_SALES'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'fct_sales_v1'
+)
+UNION ALL
+SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_v2
+WHERE EXISTS (
+  SELECT 1
+  FROM contoso_meta_${env}.audit.audit_gold_publication_group g
+  JOIN contoso_meta_${env}.audit.audit_gold_publication p
+    ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_SALES'
+  WHERE g.publication_group_id = 'SALES_MART'
+    AND g.release_status = 'ACTIVE'
+    AND p.physical_slot = 'fct_sales_v2'
+);
 
 -- -----------------------------------------------------------------------------
 -- Freshness monitoring: maakt zichtbaar hoe oud de actieve versie is.
@@ -117,14 +182,24 @@ AS SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_v1;
 CREATE OR REPLACE VIEW v_gold_freshness
 COMMENT 'Actualiteit van elke Gold Actueel dataset; alarmeert bij bevroren marts.'
 AS
-SELECT 'dim_customer' AS entity, _as_of_delivery_id, _as_of_timestamp, _batch_id,
-       round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2) AS freshness_hours
-FROM dim_customer LIMIT 1
+WITH customer_freshness AS (
+  SELECT 'dim_customer' AS entity, _as_of_delivery_id, _as_of_timestamp, _batch_id,
+         round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2) AS freshness_hours
+  FROM dim_customer
+  LIMIT 1
+), product_freshness AS (
+  SELECT 'dim_product' AS entity, _as_of_delivery_id, _as_of_timestamp, _batch_id,
+         round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2) AS freshness_hours
+  FROM dim_product
+  LIMIT 1
+), sales_freshness AS (
+  SELECT 'fct_sales' AS entity, _as_of_delivery_id, _as_of_timestamp, _batch_id,
+         round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2) AS freshness_hours
+  FROM fct_sales
+  LIMIT 1
+)
+SELECT * FROM customer_freshness
 UNION ALL
-SELECT 'dim_product', _as_of_delivery_id, _as_of_timestamp, _batch_id,
-       round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2)
-FROM dim_product LIMIT 1
+SELECT * FROM product_freshness
 UNION ALL
-SELECT 'fct_sales', _as_of_delivery_id, _as_of_timestamp, _batch_id,
-       round((unix_timestamp(current_timestamp()) - unix_timestamp(_as_of_timestamp)) / 3600.0, 2)
-FROM fct_sales LIMIT 1;
+SELECT * FROM sales_freshness;

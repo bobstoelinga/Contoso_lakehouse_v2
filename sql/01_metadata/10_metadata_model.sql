@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS meta_source_system (
 )
 USING DELTA
 COMMENT 'Bronsystemen en hun landingconventie.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
 
 -- -----------------------------------------------------------------------------
 -- 2. Bronobjecten + laadstrategie
@@ -41,6 +44,10 @@ CREATE TABLE IF NOT EXISTS meta_source_object (
   change_tracking_columns ARRAY<STRING> COMMENT 'Kolommen die een wijziging aanduiden (hashdiff-scope)',
   deleted_flag_column   STRING              COMMENT 'Kolom die een logische delete markeert',
   is_mandatory_in_delivery BOOLEAN NOT NULL DEFAULT true COMMENT 'Blokkeert de leverings-gate indien afwezig',
+  schema_drift_policy   STRING    NOT NULL DEFAULT 'STRICT'
+                        COMMENT 'STRICT | ALLOW_NEW_COLUMNS_WITH_APPROVAL | RESCUE',
+  owner_team            STRING    NOT NULL COMMENT 'Operationeel verantwoordelijke domeinteam',
+  criticality           STRING    NOT NULL DEFAULT 'MEDIUM' COMMENT 'LOW | MEDIUM | HIGH',
 
   -- bronze doel
   bronze_catalog        STRING    NOT NULL,
@@ -73,7 +80,10 @@ CREATE TABLE IF NOT EXISTS meta_source_object (
 )
 USING DELTA
 COMMENT 'Bronobjecten, laadstrategie en fysieke doellocaties per laag.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
 
 -- -----------------------------------------------------------------------------
 -- 3. Afhankelijkheden (nooit hardcoded in code of workflow)
@@ -86,11 +96,16 @@ CREATE TABLE IF NOT EXISTS meta_dependency (
   depends_on_layer      STRING  NOT NULL,
   dependency_type       STRING  NOT NULL COMMENT 'DELIVERY_COMPLETE | UPSTREAM_SUCCESS | SAME_DELIVERY',
   is_blocking           BOOLEAN NOT NULL DEFAULT true,
+  priority              INT     NOT NULL DEFAULT 100 COMMENT 'Lagere waarde wordt eerder ingepland',
+  retry_policy          STRING  NOT NULL DEFAULT 'EXPONENTIAL_BACKOFF'
+                              COMMENT 'NONE | FIXED_DELAY | EXPONENTIAL_BACKOFF',
+  max_retries           INT     NOT NULL DEFAULT 3,
   is_active             BOOLEAN NOT NULL DEFAULT true,
   CONSTRAINT pk_dependency PRIMARY KEY (dependency_id) RELY
 )
 USING DELTA
-COMMENT 'Afhankelijkheidsgraaf tussen entiteiten en lagen. Bepaalt runtime volgorde.';
+COMMENT 'Afhankelijkheidsgraaf tussen entiteiten en lagen. Bepaalt runtime volgorde.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 4. Kwaliteitsregels
@@ -112,13 +127,16 @@ CREATE TABLE IF NOT EXISTS meta_quality_rule (
   threshold_pct         DOUBLE  COMMENT 'Max % afgekeurde records voordat de hele batch faalt',
   on_threshold_breach   STRING  NOT NULL DEFAULT 'FAIL_BATCH'
       COMMENT 'FAIL_BATCH | QUARANTINE_BATCH | WARN_ONLY',
+  is_blocking           BOOLEAN NOT NULL DEFAULT true,
+  rule_group            STRING  NOT NULL DEFAULT 'CORE',
   is_active             BOOLEAN NOT NULL DEFAULT true,
   CONSTRAINT pk_quality_rule PRIMARY KEY (rule_id) RELY,
   CONSTRAINT fk_quality_rule_object FOREIGN KEY (source_object_id)
     REFERENCES meta_source_object(source_object_id) RELY
 )
 USING DELTA
-COMMENT 'Declaratieve kwaliteitsregels; uitgevoerd als Spark SQL expressies.';
+COMMENT 'Declaratieve kwaliteitsregels; uitgevoerd als Spark SQL expressies.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 5. Bron-doel mappings (kolomniveau)
@@ -140,7 +158,8 @@ CREATE TABLE IF NOT EXISTS meta_mapping (
   CONSTRAINT pk_mapping PRIMARY KEY (mapping_id) RELY
 )
 USING DELTA
-COMMENT 'Bron-doel mapping op kolomniveau, inclusief transformatie-expressies.';
+COMMENT 'Bron-doel mapping op kolomniveau, inclusief transformatie-expressies.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 6. Data Vault entiteiten
@@ -164,7 +183,8 @@ CREATE TABLE IF NOT EXISTS meta_dv_entity (
   CONSTRAINT pk_dv_entity PRIMARY KEY (dv_entity_id) RELY
 )
 USING DELTA
-COMMENT 'Definitie van Data Vault entiteiten (raw en business vault).';
+COMMENT 'Definitie van Data Vault entiteiten (raw en business vault).'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 7. Data Vault mappings (bron -> DV kolom)
@@ -186,7 +206,8 @@ CREATE TABLE IF NOT EXISTS meta_dv_mapping (
     REFERENCES meta_dv_entity(dv_entity_id) RELY
 )
 USING DELTA
-COMMENT 'Kolommapping van Quality naar Data Vault, inclusief hashdiff-scope.';
+COMMENT 'Kolommapping van Quality naar Data Vault, inclusief hashdiff-scope.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 8. Gold entiteiten
@@ -207,9 +228,13 @@ CREATE TABLE IF NOT EXISTS meta_gold_entity (
   publish_mode          STRING  NOT NULL DEFAULT 'ATOMIC_SWAP'
       COMMENT 'ATOMIC_SWAP (view-pointer) | MERGE | OVERWRITE',
   publication_group_id  STRING  COMMENT 'Alle entiteiten in dezelfde groep switchen samen of niet',
+  publish_status        STRING  NOT NULL DEFAULT 'READY' COMMENT 'READY | ACTIVE | FAILED',
+  pointer_table         STRING  COMMENT 'Publieke view die BI-consumenten gebruiken',
+  staging_table         STRING  COMMENT 'Een fysiek slot met suffix _v1 of _v2',
   load_order            INT     NOT NULL,
   is_active             BOOLEAN NOT NULL DEFAULT true,
   CONSTRAINT pk_gold_entity PRIMARY KEY (gold_entity_id) RELY
 )
 USING DELTA
-COMMENT 'Definitie van Gold Historisch en Gold Actueel entiteiten.';
+COMMENT 'Definitie van Gold Historisch en Gold Actueel entiteiten.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');

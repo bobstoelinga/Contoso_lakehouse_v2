@@ -1,0 +1,29 @@
+# Handmatige beheeractie voor gecontroleerd overslaan van een levering.
+resources:
+  jobs:
+    supersede_delivery:
+      name: "[${var.env}] Contoso - Supersede Delivery"
+      description: >-
+        Markeert een niet-complete levering gecontroleerd als SUPERSEDED, met
+        verplichte reden, goedkeurder en goedkeuringsreferentie.
+      max_concurrent_runs: 1
+      parameters:
+        - name: delivery_id
+          default: ""
+        - name: reason
+          default: ""
+        - name: approved_by
+          default: ""
+        - name: approval_reference
+          default: ""
+      tasks:
+        - task_key: supersede_delivery
+          notebook_task:
+            notebook_path: ../notebooks/07_supersede_delivery.py
+            base_parameters:
+              env: ${var.env}
+              delivery_id: "{{job.parameters.delivery_id}}"
+              reason: "{{job.parameters.reason}}"
+              approved_by: "{{job.parameters.approved_by}}"
+              approval_reference: "{{job.parameters.approval_reference}}"
+              repo_root: ${workspace.file_path}

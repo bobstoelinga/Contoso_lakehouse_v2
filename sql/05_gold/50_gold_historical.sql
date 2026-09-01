@@ -87,9 +87,7 @@ CREATE TABLE IF NOT EXISTS fct_sales_hist (
   record_source     STRING    NOT NULL,
   _batch_id         STRING    NOT NULL,
   _loaded_at        TIMESTAMP NOT NULL,
-  CONSTRAINT pk_fct_sales_hist PRIMARY KEY (sales_line_hk, valid_from) RELY,
-  CONSTRAINT fk_fct_customer FOREIGN KEY (customer_hk) REFERENCES dim_customer_hist(customer_hk) NOT ENFORCED,
-  CONSTRAINT fk_fct_product  FOREIGN KEY (product_hk)  REFERENCES dim_product_hist(product_hk)  NOT ENFORCED
+  CONSTRAINT pk_fct_sales_hist PRIMARY KEY (sales_line_hk, valid_from) RELY
 )
 USING DELTA
 CLUSTER BY (order_date, customer_hk, product_hk)

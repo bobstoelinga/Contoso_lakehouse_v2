@@ -65,7 +65,7 @@ display(
     spark.sql(
         f"""
         SELECT entity_id, run_status, rows_inserted, duration_seconds
-        FROM {settings.meta_catalog}.audit.audit_load_run
+        FROM {settings.meta_catalog}.audit.v_load_run_status
         WHERE batch_id = '{ctx.batch_id}' AND layer = '{layer}'
         ORDER BY started_at
         """

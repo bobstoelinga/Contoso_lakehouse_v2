@@ -1,0 +1,7 @@
+-- =============================================================================
+-- 12_metadata_migrations.sql
+-- Declaratieve kolommigraties voor al bestaande metadata- en audittabellen.
+-- De setup-notebook voert deze schema-aware uit: eerst DESCRIBE, daarna alleen
+-- ontbrekende kolommen met ALTER TABLE ... ADD COLUMNS, omdat Serverless SQL
+-- geen ADD COLUMN IF NOT EXISTS ondersteunt.
+-- =============================================================================

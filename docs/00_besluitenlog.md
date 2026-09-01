@@ -39,6 +39,21 @@ Vastgestelde uitgangspunten:
    tientallen bronsystemen en honderden tabellen.
 3. **Ontwerp v2** — De P0- en P1-bevindingen zijn verwerkt in de code en de
    metadata; de resterende punten staan in [§6](#6-openstaande-punten).
+4. **Inrichtingssessie (31 augustus 2026)** — Gebruikers-OAuth is lokaal
+   gevalideerd met het profiel `contoso-dev`; de bundle is succesvol gedeployed
+   naar `dev`. De setup legde aanvankelijk de ontbrekende Unity Catalog external
+   location voor de Azure-landingzone bloot; die voorwaarde is daarna ingericht
+   en gevalideerd. De setup moet nogmaals worden uitgevoerd.
+5. **Validatiesessie (1 september 2026)** — `python -m pytest -q` slaagde eerst
+   met 37 tests en na nieuwe regressiedekking met 38 tests. `bundle validate` en
+   `setup_lakehouse` voor `dev` zijn geslaagd. De eerste pipeline-run faalde in
+   Bronze op een Serverless-onverenigbare sessieconfiguratie; na herstel bereikte
+   de tweede run Quality en faalde daar op een niet-opgeloste metadata-placeholder.
+   Na herstel doorliep de derde run Bronze, Quality, Raw Vault, Business Vault en
+   Gold Historisch; alleen de Gold Actueel factprojectie bevatte nog een typefout.
+   De vierde run werd correct door Quality geblokkeerd op een dubbele `customer_key`
+   in de reeds bestaande demo-levering `SALES|2026-08-29`; een nieuwe datumfolder
+   is gekozen voor de schone eindvalidatie.
 
 ---
 
@@ -107,10 +122,17 @@ volledige originele payload als JSON, en een levenscyclus
 moest worden.
 
 **Besluit:** Elke Gold Actueel dataset heeft twee fysieke slots (`_v1`/`_v2`) in
-`current_internal`; de publieke objecten in `current` zijn views. Alle entiteiten
-met dezelfde `publication_group_id` (`SALES_MART`) switchen in één stap. Faalt er
-één, dan wordt niets gepubliceerd en blijft de vorige versie actief.
+`current_internal`; de publieke objecten in `current` zijn views. Vóór iedere
+pointerwissel moet de volledige `publication_group_id` (`SALES_MART`) nog de
+auditstatus `BUILDING` hebben. Daarna promoot één Delta `MERGE` de
+groep-releasepointer naar de nieuwe batch. De publieke views leiden elk hun
+fysieke slot af uit die ene pointer; bij een incomplete of gefaalde groep
+blijft de pointer en daarmee de vorige consistente release ongewijzigd.
 → [src/contoso_lakehouse/gold.py](../src/contoso_lakehouse/gold.py)
+
+**Consumer-contract:** BI-consumenten gebruiken uitsluitend de publieke views
+in `current`. Fysieke slots en audit-tabellen zijn implementatiedetails en
+krijgen geen leesrechten voor BI-rollen.
 
 ### B-09 — Freshness expliciet zichtbaar
 **Besluit:** Elke Gold Actueel tabel draagt `_as_of_delivery_id`,
@@ -161,6 +183,223 @@ dubbele satellite-rijen op.
 lagen en signaleert verlopen Gold-slots. Superseded slots blijven minimaal
 24 uur bestaan zodat lopende BI-queries hun bron niet verliezen.
 
+### B-17 — Landing is een external volume op ADLS Gen2
+**Besluit:** Bestandsaanlevering van buiten Databricks gebeurt uitsluitend via
+het external volume `raw_<env>.sales.landing`. Managed volumes (`checkpoints`,
+`quarantine`) blijven alleen toegankelijk vanuit Databricks en worden niet als
+integratiepunt gebruikt.
+
+**Configuratie dev:** storage account `contosolake3`, container `landing`,
+subfolder `sales`; de volume-URL is
+`abfss://landing@contosolake3.dfs.core.windows.net/sales`.
+
+**Vereiste:** vóór de setup moet een metastorebeheerder een Unity Catalog storage
+credential en external location op
+`abfss://landing@contosolake3.dfs.core.windows.net/` aanmaken. De identity van
+de credential krijgt minimaal Azure RBAC `Storage Blob Data Contributor` op de
+container. De uitvoerende gebruiker krijgt in Unity Catalog `CREATE EXTERNAL
+VOLUME` op de external location.
+
+**Ingericht (31 augustus 2026):** de managed identity van Access Connector
+`ac-databricks-contoso-dev` heeft op storage account `contosolake3` de rollen
+`Storage Blob Data Contributor`, `Storage Queue Data Contributor`, `Storage
+Account Contributor` en `EventGrid EventSubscription Contributor`. De
+credentialtest moet opnieuw worden uitgevoerd nadat Azure RBAC is gepropageerd.
+
+**Ingericht voor file events (31 augustus 2026):** naast de drie
+storage-accountrollen heeft `ac-databricks-contoso-dev` nu ook `EventGrid Data
+Contributor` op resource group `Databricks`. De storage-accountfirewall moet
+nog de optie `Allow trusted Microsoft services to access this resource`
+toestaan. `EventGrid EventSubscription Contributor` op alleen het storage
+account vervangt de resource-grouprol niet.
+
+**Diagnose en herstel (31 augustus 2026):** de validatie van file events faalde
+omdat de Azure resource provider `Microsoft.EventGrid` voor de subscription niet
+was geregistreerd. De provider is geregistreerd en heeft de status `Registered`.
+Het storage account is geschikt: `StorageV2`, `Standard_RAGRS`, hierarchical
+namespace ingeschakeld en publieke netwerktoegang ingeschakeld. De
+external-locationtest moet opnieuw worden uitgevoerd.
+
+**Gevalideerd (31 augustus 2026):** de Databricks external location is na de
+Azure-inrichting opnieuw getest; toegang tot storage en `File Events Read` zijn
+geslaagd. Het landing external volume kan nu door de lakehouse-setup worden
+aangemaakt.
+
+### B-18 — Lokale deploy gebruikt gebruikers-OAuth in dev
+**Besluit:** Deploy en setup in `dev` worden uitgevoerd met het lokale
+Databricks-profiel `contoso-dev` en gebruikers-OAuth. De geconfigureerde
+Databricks service principal is uitsluitend de `run_as`-identity voor `tst` en
+`prd`; zijn OAuth-machine-to-machine-credentials worden niet opgeslagen in de
+repository.
+
+### B-19 — Herstelde inrichtingsdefecten
+**Besluit:** De file-arrival-trigger gebruikt een volume-URL met afsluitende
+slash, zoals door de Databricks Jobs API vereist. De setup-notebook verwijdert
+SQL-commentaarregels per statement voordat DDL wordt uitgevoerd; hierdoor wordt
+het eerste `CREATE CATALOG`-statement niet meer ten onrechte overgeslagen.
+
+### B-20 — Actuele marts gebruiken een atomische groepsreleasepointer
+**Besluit:** Een Gold-publicatiegroep wordt niet langer door een reeks
+`CREATE OR REPLACE VIEW`-acties gepubliceerd. Nadat alle entiteiten de status
+`BUILDING` hebben, zet één Delta `MERGE` in
+`audit_gold_publication_group` de actieve batch voor de groep. De publieke
+views leiden hun fysieke slot uit die pointer af. Daardoor zien consumenten
+steeds een consistente groep van dimensies en feiten.
+→ [src/contoso_lakehouse/gold.py](../src/contoso_lakehouse/gold.py),
+[sql/05_gold/51_gold_current.sql](../sql/05_gold/51_gold_current.sql)
+
+### B-21 — Audit runs refereren aan een immutable metadatarelease
+**Besluit:** De volledige set seed-metadata krijgt bij deployment een
+deterministische SHA-256-fingerprint. Die release wordt in
+`audit_metadata_version` geregistreerd en iedere load-run bewaart de gebruikte
+`metadata_version`. Dit maakt herstel en onderzoek reproduceerbaar tegen de
+exacte Git/DAB-metadatarelease. Een idempotente migratie vult de nieuwe velden
+ook aan in reeds bestaande Delta-tabellen.
+→ [src/contoso_lakehouse/seed.py](../src/contoso_lakehouse/seed.py),
+[sql/01_metadata/12_metadata_migrations.sql](../sql/01_metadata/12_metadata_migrations.sql)
+
+### B-22 — Bronze schaalt via begrensde Serverless task fan-out
+**Besluit:** Eén notebookdriver start niet langer alle Auto Loader-streams
+serieel en gebruikt ook geen Python-threads voor gelijktijdige Spark-jobs. Een
+planner levert één gedeelde `batch_id` en de actieve bronobjecten aan een
+Databricks `for_each_task`. Elke iteratie draait als afzonderlijke Serverless
+taak; `bronze_parallelism` begrenst de gelijktijdigheid per bronsysteem. De
+delivery-gate start pas nadat alle iteraties gereed zijn.
+→ [notebooks/06_plan_bronze_fanout.py](../notebooks/06_plan_bronze_fanout.py),
+[workflows/pipeline.job.yml](../workflows/pipeline.job.yml)
+
+**Schaalgrens:** Task values kunnen maximaal 48 KB aan `for_each`-input
+doorgeven. Bij meer objecten dan daarin passen, gebruikt de planner een Delta
+control-tabel als lookup in plaats van de objectlijst als task value.
+
+### B-23 — Parallelle Serverless-runs loggen append-only
+**Probleem:** gelijktijdige Bronze-taken werkten dezelfde gepartitioneerde
+`audit_load_run`-tabel bij. Hierdoor ontstonden Delta optimistic-concurrency
+conflicten op de gedeelde `BRONZE`-partitie, hoewel de brontabellen onafhankelijk
+waren.
+
+**Besluit:** elke statusovergang schrijft een immutable rij naar
+`audit_load_run_event`. `v_load_run_status` projecteert daaruit de actuele status
+per `run_id`; gates en dashboards lezen alleen die view. Parallelle Serverless
+taken doen hierdoor uitsluitend append-operaties op de auditlaag.
+→ [src/contoso_lakehouse/audit.py](../src/contoso_lakehouse/audit.py),
+[sql/01_metadata/11_audit_model.sql](../sql/01_metadata/11_audit_model.sql)
+
+### B-24 — Serverless-schema-evolution staat op de MERGE-operatie
+**Probleem:** `spark.databricks.delta.schema.autoMerge.enabled` is op Databricks
+Serverless niet beschikbaar. Daardoor faalden alle parallelle Bronze-taken,
+ondanks correcte landingbestanden en metadata.
+
+**Besluit:** Bronze gebruikt `MERGE WITH SCHEMA EVOLUTION` in plaats van de
+sessieconfiguratie. Een regressietest verbiedt de Serverless-onverenigbare
+configuratie. De daaropvolgende pipeline-run bevestigde een succesvolle Bronze-
+fan-out en delivery gate; Quality werd vervolgens bereikt.
+→ [src/contoso_lakehouse/bronze.py](../src/contoso_lakehouse/bronze.py),
+[tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py)
+
+### B-25 — Kwaliteitsregels moeten volledig omgevingsresolubaar zijn
+**Probleem:** referentiële DQ-regels gebruikten `{quality_schema}`, terwijl
+alleen catalog-placeholders worden ondersteund. De placeholder kwam daardoor
+ongewijzigd in de gegenereerde SQL terecht en Quality faalde met een parsefout.
+
+**Besluit:** de regels verwijzen naar het contractuele schema `sales` en een
+regressietest detecteert naamachtige, niet-opgeloste placeholders. Hierdoor
+blijft environment-resolutie beperkt tot fysieke catalognamen.
+→ [metadata/seed/meta_quality_rule.json](../metadata/seed/meta_quality_rule.json),
+[tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py)
+
+### B-26 — Gold Actueel volgt het fysieke factcontract
+**Probleem:** de metadataquery voor `GC_FCT_SALES` bevatte de typefout
+`customer_h+s` en projecteerde slechts een deel van de kolommen die in de
+fysieke Gold Actueel facttabel zijn gedefinieerd. De derde end-to-end-run faalde
+daardoor uitsluitend in `gold_current`; de releasepointer bleef ongewijzigd.
+
+**Besluit:** de metadataquery projecteert nu alle factcontractkolommen uit de
+historische mart, met `customer_hk`. Een regressietest bewaakt die kolommenset.
+→ [metadata/seed/meta_gold_entity.json](../metadata/seed/meta_gold_entity.json),
+[tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py)
+
+### B-27 — Kwaliteitsfouten blijven traceerbaar per onveranderlijke levering
+**Bevinding:** de eerder aangemaakte folder `SALES|2026-08-29` bevat een dubbele
+`customer_key` en overschrijdt de drempel van regel `DQ-CUST-002`. De
+Quality-gate heeft de vervolglagen daardoor correct geblokkeerd.
+
+**Besluit:** de levering blijft ongewijzigd beschikbaar voor kwaliteitsanalyse.
+De demo-generator schrijft voor de eindvalidatie naar de nieuwe datumfolder
+`2026-09-01`, zodat de proef geen historische brondata muteert.
+
+### B-28 — Chronologische delivery-gate blokkeert latere leveringen correct
+**Bevinding:** de nieuwe, valide demo-levering `SALES|2026-09-01` is succesvol
+naar landing geschreven. De daaropvolgende pipeline-run koos echter terecht
+eerst `SALES|2026-08-29`: die is de laagste nog niet succesvol gepubliceerde
+levering en faalt op `DQ-CUST-002`. De nieuwe folder wordt dus niet verwerkt
+voordat de oudere levering is hersteld of expliciet als `SUPERSEDED` is gemarkeerd.
+
+**Besluit:** voor de `dev`-eindvalidatie wordt de historische testlevering via
+het reject-herverwerkingsproces hersteld, of na expliciete goedkeuring als
+`SUPERSEDED` gemarkeerd. De view `v_next_processable_delivery` is toegevoegd
+aan het monitoringsscript om deze blokkade operationeel zichtbaar te maken.
+
+### B-29 — Projectverslag is de operationele beslis- en validatiehistorie
+**Besluit (1 september 2026):** relevante testresultaten, runtimebevindingen,
+configuratiewijzigingen, ontwerp- en beheerbesluiten, en open acties worden
+bij iedere werkstap vastgelegd in dit besluitenverslag. Hierdoor blijven
+technische keuzes, hun onderbouwing en de geverifieerde uitkomst traceerbaar
+voor later beheer, review en overdracht.
+
+### B-30 — Dev gebruikt gecontroleerd superseden voor de geblokkeerde demo-levering
+**Overwogen opties:** (1) herstel `SALES|2026-08-29` via het rejectproces en
+verwerk de levering opnieuw; (2) markeer de onvoltooide demo-levering als
+`SUPERSEDED` en verwerk daarna `SALES|2026-09-01`.
+
+**Besluit (1 september 2026):** voor de `dev`-eindvalidatie is optie 2 gekozen.
+Dit verandert geen brondata en maakt de beslissing traceerbaar met tijdstip,
+reden, goedkeurder en referentie in `audit_delivery`. Voor `tst` en `prd`
+blijft optie 1 de standaard; superseden vereist daar formele goedkeuring.
+→ [notebooks/07_supersede_delivery.py](../notebooks/07_supersede_delivery.py),
+[workflows/delivery_remediation.job.yml](../workflows/delivery_remediation.job.yml)
+
+### B-31 — Beheerjobs gebruiken hetzelfde gedeployde frameworkpad
+**Bevinding:** de eerste uitvoering van de nieuwe `supersede_delivery`-job
+faalde met `ModuleNotFoundError` omdat de notebook het bundle-`src`-pad niet
+aan `sys.path` toevoegde. De audit-tabel is hierdoor niet gewijzigd.
+
+**Besluit:** iedere notebook die frameworkmodules importeert ontvangt
+`repo_root` uit `${workspace.file_path}` en voegt `${repo_root}/src` toe aan
+`sys.path`. De remediation-notebook heeft hiervoor regressiedekking.
+
+### B-32 — Bronze-compleet is niet gelijk aan end-to-end gepubliceerd
+**Bevinding:** de tweede remediation-poging blokkeerde `SALES|2026-08-29`
+omdat de status `COMPLETE` was. Die status beschrijft correct dat alle verplichte
+bronobjecten in Bronze zijn geladen, maar zegt niets over Quality, Vault of Gold.
+
+**Besluit:** een levering mag alleen niet als `SUPERSEDED` worden gemarkeerd
+als er een actieve Gold-publicatiegroep voor bestaat. Een Bronze-complete maar
+Quality-geblokkeerde levering kan na expliciete goedkeuring wel worden
+gesuperseded. De auditvelden bewaren de volledige beheersreden.
+
+### B-33 — Alleen een atomische Gold-release blokkeert superseden
+**Bevinding:** de derde remediation-poging behandelde een losse succesvolle
+`GOLD_CURR`-entiteitsbuild als een gepubliceerde levering. Bij een gefaalde
+publicatiegroep kan zo'n build bestaan zonder dat consumenten de nieuwe data
+zien, omdat de groepspointer niet naar de batch is gewisseld.
+
+**Besluit:** de supersede-guard controleert uitsluitend een `ACTIVE`-record in
+`audit_gold_publication_group` voor de levering. Hierdoor zijn gepubliceerde
+releases beschermd, terwijl gedeeltelijke builds na goedkeuring herstelbaar of
+over te slaan blijven.
+
+### B-34 — Geblokkeerde dev-levering gecontroleerd gesuperseded
+**Uitvoering (1 september 2026):** de remediation-job heeft
+`SALES|2026-08-29` succesvol als `SUPERSEDED` gemarkeerd met reden "Dubbele
+customer_key in historische demo-levering blokkeert dev-eindvalidatie",
+goedkeurder `stoelingabob@gmail.com` en referentie `B-30`.
+
+**Status bij onderbreking:** de nieuwe, valide levering `SALES|2026-09-01`
+staat in landing klaar. Bij hervatting start de pipeline opnieuw; de
+chronologische gate kan dan deze levering selecteren voor de resterende
+end-to-end-validatie tot en met Gold Actueel.
+
 ---
 
 ## 4. Opgeleverde artefacten
@@ -179,6 +418,7 @@ lagen en signaleert verlopen Gold-slots. Superseded slots blijven minimaal
 | Databricks notebooks | [notebooks](../notebooks) |
 | Workflows (Asset Bundle) | [databricks.yml](../databricks.yml), [workflows](../workflows) |
 | Metadata-consistentietests | [tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py) |
+| Operationele monitoringsqueries | [sql/01_metadata/13_monitoring_queries.sql](../sql/01_metadata/13_monitoring_queries.sql) |
 
 ## 5. Review-bevindingen en status
 
@@ -196,19 +436,23 @@ lagen en signaleert verlopen Gold-slots. Superseded slots blijven minimaal
 | 10 | Delete-detectie ontbrak in de vault | P2 | Opgelost — status- en effectivity satellites toegevoegd |
 | 11 | Geen onderhouds- en retentiebeleid | P2 | Opgelost (B-16) |
 | 12 | Geen freshness-monitoring | P2 | Opgelost (B-09) |
-| 13 | SCD2 op het metadatamodel zelf | P1 | **Open** |
+| 13 | Reproduceerbare metadata-versie per load-run | P1 | Opgelost (B-21) |
 | 14 | `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT` laadstrategieën | P2 | **Open** |
-| 15 | Stream-groepering per bronsysteem (schaal > 1000 tabellen) | P2 | **Open** |
+| 15 | Begrensde Serverless-paralleliteit voor Bronze | P2 | Opgelost (B-22) |
 | 16 | Ownership, PII-classificatie, SLA in de metadata | P2 | **Open** |
+| 17 | Unity Catalog external location voor ADLS-landing ontbreekt | P0 | Opgelost (B-17) |
+| 18 | File-arrival-trigger vereiste afsluitende slash | P1 | Opgelost (B-19) |
+| 19 | DDL-runner sloeg statements na SQL-commentaar over | P1 | Opgelost (B-19) |
 
 ## 6. Openstaande punten
 
-1. **Metadata-historie (P1).** Zonder `valid_from`/`valid_to` op de
-   configuratietabellen is een load van maanden geleden niet reproduceerbaar.
-   Voorstel: SCD2 op alle `meta_*` tabellen + `metadata_version` in `audit_load_run`.
+1. **Metadata-SCD2 (P2).** Git/DAB-releases en `metadata_version` maken runs
+   reproduceerbaar. Bitemporale, runtime-wijzigbare metadata is alleen nodig
+   als productieconfiguratie buiten Git mag worden aangepast.
 2. **CDC-laadstrategie (P2).** Vereist voor ERP/CRM-bronnen met een change feed.
-3. **Stream-groepering (P2).** Eén stream per tabel loopt vast rond duizenden
-   tabellen; nodig zijn `ingest_group_id` en `stream_isolation_level`.
+3. **Fan-out lookup voor zeer grote inventories (P2).** Boven de 48 KB
+   task-valuegrens moet de Serverless `for_each` zijn inputs uit een Delta
+   control-tabel ophalen in plaats van uit een task value.
 4. **Governance-metadata (P2).** `data_owner`, `pii_classification`,
    `retention_days`, `sla_minutes`, `cost_center`.
 5. **Beleidskeuze reject-herverwerking.** De structuur is er; het proces (wie
@@ -218,8 +462,10 @@ lagen en signaleert verlopen Gold-slots. Superseded slots blijven minimaal
 
 ## 7. Vervolgstappen
 
-1. Bevestigen van de openstaande punten en prioritering.
-2. Workspace-hosts en storage account invullen in [databricks.yml](../databricks.yml).
-3. `databricks bundle deploy -t dev` en `bundle run setup_lakehouse -t dev`.
-4. Testlevering in `/Volumes/raw_dev/sales/landing/<yyyy-MM-dd>/` plaatsen en de
+1. `databricks bundle run setup_lakehouse -t dev --profile contoso-dev` opnieuw
+   uitvoeren; de bundle is al succesvol gedeployed en de landing-voorwaarde is
+   gevalideerd.
+2. Testlevering in `/Volumes/raw_dev/sales/landing/<yyyy-MM-dd>/` plaatsen en de
    pipeline end-to-end valideren.
+3. De resterende P2-punten prioriteren: CDC, governance-metadata, de grote
+   fan-out inventory, reject-herverwerking en effectivity satellites.

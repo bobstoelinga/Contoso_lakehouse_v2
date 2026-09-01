@@ -1,0 +1,18 @@
+# Handmatige utility-job voor een gecontroleerde end-to-end demo-levering.
+resources:
+  jobs:
+    generate_demo_delivery:
+      name: "[${var.env}] Contoso - Generate Demo Delivery"
+      description: >-
+        Schrijft een kleine, valide Sales-levering naar de landing volume. De
+        doel-folder wordt nooit overschreven.
+      max_concurrent_runs: 1
+
+      tasks:
+        - task_key: generate_delivery
+          notebook_task:
+            notebook_path: ../notebooks/01_generate_demo_delivery.py
+            base_parameters:
+              env: ${var.env}
+              delivery_date: ${var.demo_delivery_date}
+              repo_root: ${workspace.file_path}

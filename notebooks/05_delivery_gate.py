@@ -11,6 +11,7 @@
 
 dbutils.widgets.text("env", "dev")
 dbutils.widgets.text("source_system_id", "SALES")
+dbutils.widgets.text("batch_id", "")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
 
 # COMMAND ----------
@@ -27,7 +28,7 @@ env = dbutils.widgets.get("env")
 source_system_id = dbutils.widgets.get("source_system_id")
 
 settings = Settings(env=env)
-ctx = RunContext(settings=settings)
+ctx = RunContext.create(settings, batch_id=dbutils.widgets.get("batch_id"))
 repo = MetadataRepository(spark, settings)
 orch = Orchestrator(spark, repo, ctx)
 

@@ -11,13 +11,28 @@ variables:
     default: dev
   storage_account:
     description: Storage account met het landing volume
-    default: contosolake
+    default: contosolake3
   source_system_id:
     description: Bronsysteem dat door de pipeline wordt verwerkt
     default: SALES
+  bronze_parallelism:
+    description: Maximale gelijktijdige Serverless Bronze-taken per bronsysteem
+    default: 4
+  demo_delivery_date:
+    description: Datumfolder voor de handmatig gestarte demo-levering
+    default: 2026-09-01
   service_principal:
     description: Service principal die de workflows uitvoert
-    default: svc_contoso_etl
+    default: 22fb388c-33eb-46a3-8031-0cb4db20209d
+  data_engineers_group:
+    description: Accountgroep met data-engineerrechten
+    default: grp_data_engineers
+  bi_analysts_group:
+    description: Accountgroep met leesrechten op Gold
+    default: grp_bi_analysts
+  data_stewards_group:
+    description: Accountgroep met leesrechten op Reject
+    default: grp_data_stewards
 
 targets:
   dev:
@@ -27,6 +42,9 @@ targets:
       host: https://adb-7405619535862062.2.azuredatabricks.net/
     variables:
       env: dev
+      data_engineers_group: stoelingabob@gmail.com
+      bi_analysts_group: stoelingabob@gmail.com
+      data_stewards_group: stoelingabob@gmail.com
 
   tst:
     mode: production

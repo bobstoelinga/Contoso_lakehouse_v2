@@ -120,6 +120,18 @@ class MetadataValidator:
                     "GOLD", entity.gold_entity_id,
                     "ATOMIC_SWAP zonder publication_group_id: cross-entity consistentie niet gegarandeerd."
                 ))
+            if entity.publish_mode == "ATOMIC_SWAP" and not entity.pointer_table:
+                issues.append(ValidationIssue(
+                    "GOLD", entity.gold_entity_id,
+                    "ATOMIC_SWAP zonder pointer_table: veilige publicatie is niet mogelijk."
+                ))
+            if entity.publish_mode == "ATOMIC_SWAP" and not (
+                entity.staging_table or ""
+            ).endswith(("_v1", "_v2")):
+                issues.append(ValidationIssue(
+                    "GOLD", entity.gold_entity_id,
+                    "ATOMIC_SWAP staging_table moet eindigen op _v1 of _v2."
+                ))
             err = self._explain(entity.select_sql)
             if err:
                 issues.append(ValidationIssue("GOLD", entity.gold_entity_id, err))

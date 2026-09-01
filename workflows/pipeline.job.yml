@@ -17,7 +17,7 @@ resources:
       trigger:
         # Auto Loader start Bronze zodra er bestanden in het landing volume staan.
         file_arrival:
-          url: /Volumes/raw_${var.env}/sales/landing
+          url: "/Volumes/raw_${var.env}/sales/landing/"
           min_time_between_triggers_seconds: 300
           wait_after_last_change_seconds: 120
 
@@ -35,19 +35,34 @@ resources:
               repo_root: ${workspace.file_path}
 
         # ------------------------------------------------------------------
-        - task_key: bronze_ingest
+        - task_key: plan_bronze_fanout
           depends_on: [{ task_key: validate_metadata }]
-          # Schema evolution laat de stream bewust falen bij een nieuwe kolom;
-          # de retry pikt het nieuwe schema op. Zonder retries stopt de pipeline.
-          max_retries: 3
-          min_retry_interval_millis: 60000
           notebook_task:
-            notebook_path: ../notebooks/10_bronze_autoloader.py
+            notebook_path: ../notebooks/06_plan_bronze_fanout.py
             base_parameters:
               env: ${var.env}
               source_system_id: ${var.source_system_id}
-              mode: once
               repo_root: ${workspace.file_path}
+
+        # ------------------------------------------------------------------
+        - task_key: bronze_ingest
+          depends_on: [{ task_key: plan_bronze_fanout }]
+          for_each_task:
+            inputs: "{{tasks.plan_bronze_fanout.values.bronze_inputs}}"
+            concurrency: ${var.bronze_parallelism}
+            task:
+              task_key: bronze_object
+              max_retries: 3
+              min_retry_interval_millis: 60000
+              notebook_task:
+                notebook_path: ../notebooks/10_bronze_autoloader.py
+                base_parameters:
+                  env: ${var.env}
+                  source_system_id: ${var.source_system_id}
+                  source_object_id: "{{input.source_object_id}}"
+                  batch_id: "{{tasks.plan_bronze_fanout.values.batch_id}}"
+                  mode: once
+                  repo_root: ${workspace.file_path}
 
         # ------------------------------------------------------------------
         - task_key: delivery_gate
@@ -57,6 +72,7 @@ resources:
             base_parameters:
               env: ${var.env}
               source_system_id: ${var.source_system_id}
+              batch_id: "{{tasks.plan_bronze_fanout.values.batch_id}}"
               repo_root: ${workspace.file_path}
 
         # Vervolgverwerking alleen als de levering compleet is.

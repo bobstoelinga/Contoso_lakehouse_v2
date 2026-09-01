@@ -9,6 +9,8 @@
 
 dbutils.widgets.text("env", "dev")
 dbutils.widgets.text("source_system_id", "SALES")
+dbutils.widgets.text("source_object_id", "")
+dbutils.widgets.text("batch_id", "")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
 dbutils.widgets.dropdown("mode", "once", ["once", "continuous"])
 
@@ -24,13 +26,14 @@ from contoso_lakehouse.metadata import MetadataRepository
 
 env = dbutils.widgets.get("env")
 source_system_id = dbutils.widgets.get("source_system_id")
+source_object_id = dbutils.widgets.get("source_object_id")
+batch_id = dbutils.widgets.get("batch_id")
 once = dbutils.widgets.get("mode") == "once"
 
 settings = Settings(env=env)
-ctx = RunContext(
+ctx = RunContext.create(
     settings=settings,
-    job_run_id=dbutils.notebook.entry_point.getDbutils().notebook().getContext()
-    .currentRunId().toString() if hasattr(dbutils.notebook, "entry_point") else None,
+    batch_id=batch_id,
 )
 repo = MetadataRepository(spark, settings)
 loader = BronzeLoader(spark, repo, ctx)
@@ -54,24 +57,17 @@ print(landing_path)
 
 # COMMAND ----------
 
-# MAGIC %md ## Per bronobject laden
-# MAGIC De volgorde komt uit `meta_source_object.load_order`; niets staat hardcoded.
+# MAGIC %md ## Eén bronobject laden
+# MAGIC De Serverless `for_each`-taak bepaalt de paralleliteit; dit notebook voert
+# MAGIC precies één metadata-gedefinieerd object uit.
 
 # COMMAND ----------
 
-failures = []
-for obj in repo.source_objects():
-    if obj.source_system_id != source_system_id:
-        continue
-    print(f"--- {obj.source_object_id} ({obj.load_strategy}) ---")
-    try:
-        loader.load(obj.source_object_id, landing_path, once=once)
-    except Exception as exc:  # elke stream apart; de gate bewaakt de volledigheid
-        failures.append((obj.source_object_id, str(exc)))
-        print(f"FAILED: {exc}")
-
-if failures:
-    raise RuntimeError(f"Bronze ingest gefaald voor: {failures}")
+obj = repo.source_object(source_object_id)
+if obj.source_system_id != source_system_id:
+    raise ValueError(f"{source_object_id} hoort niet bij bronsysteem {source_system_id}.")
+print(f"--- {obj.source_object_id} ({obj.load_strategy}) ---")
+loader.load(source_object_id, landing_path, once=once)
 
 # COMMAND ----------
 
@@ -88,7 +84,3 @@ display(
         """
     )
 )
-
-# COMMAND ----------
-
-dbutils.jobs.taskValues.set("batch_id", ctx.batch_id)

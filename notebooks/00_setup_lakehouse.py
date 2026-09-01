@@ -9,10 +9,18 @@
 
 dbutils.widgets.text("env", "dev")
 dbutils.widgets.text("storage_account", "contosolake")
+dbutils.widgets.text("service_principal", "svc_contoso_etl")
+dbutils.widgets.text("data_engineers_group", "grp_data_engineers")
+dbutils.widgets.text("bi_analysts_group", "grp_bi_analysts")
+dbutils.widgets.text("data_stewards_group", "grp_data_stewards")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
 
 env = dbutils.widgets.get("env")
 storage_account = dbutils.widgets.get("storage_account")
+service_principal = dbutils.widgets.get("service_principal")
+data_engineers_group = dbutils.widgets.get("data_engineers_group")
+bi_analysts_group = dbutils.widgets.get("bi_analysts_group")
+data_stewards_group = dbutils.widgets.get("data_stewards_group")
 repo_root = dbutils.widgets.get("repo_root")
 
 # COMMAND ----------
@@ -39,6 +47,7 @@ SCRIPTS = [
     "sql/00_unity_catalog/01_grants.sql",
     "sql/01_metadata/10_metadata_model.sql",
     "sql/01_metadata/11_audit_model.sql",
+    "sql/01_metadata/12_metadata_migrations.sql",
     "sql/02_bronze/20_bronze_tables.sql",
     "sql/03_quality_reject/30_quality_tables.sql",
     "sql/03_quality_reject/31_reject_tables.sql",
@@ -48,16 +57,58 @@ SCRIPTS = [
     "sql/05_gold/51_gold_current.sql",
 ]
 
-PARAMS = {"${env}": env, "${storage_account}": storage_account}
+PARAMS = {
+    "${env}": env,
+    "${storage_account}": storage_account,
+    "${service_principal}": service_principal,
+    "${data_engineers_group}": data_engineers_group,
+    "${bi_analysts_group}": bi_analysts_group,
+    "${data_stewards_group}": data_stewards_group,
+}
+
+
+def split_sql_statements(text: str) -> list[str]:
+    statements: list[str] = []
+    statement: list[str] = []
+    in_string = False
+    position = 0
+
+    while position < len(text):
+        character = text[position]
+        next_character = text[position + 1] if position + 1 < len(text) else ""
+
+        if not in_string and character == "-" and next_character == "-":
+            position = text.find("\n", position)
+            if position < 0:
+                break
+            statement.append("\n")
+        elif character == "'":
+            statement.append(character)
+            if in_string and next_character == "'":
+                statement.append(next_character)
+                position += 1
+            else:
+                in_string = not in_string
+        elif character == ";" and not in_string:
+            sql = "".join(statement).strip()
+            if sql:
+                statements.append(sql)
+            statement = []
+        else:
+            statement.append(character)
+        position += 1
+
+    sql = "".join(statement).strip()
+    if sql:
+        statements.append(sql)
+    return statements
 
 
 def run_script(relative_path: str) -> None:
     text = Path(f"{repo_root}/{relative_path}").read_text(encoding="utf-8")
     for placeholder, value in PARAMS.items():
         text = text.replace(placeholder, value)
-    for statement in (s.strip() for s in text.split(";")):
-        if not statement or statement.startswith("--"):
-            continue
+    for statement in split_sql_statements(text):
         spark.sql(statement)
 
 
@@ -67,7 +118,55 @@ for script in SCRIPTS:
 
 # COMMAND ----------
 
-# MAGIC %md ## 2. Metadata seed laden
+# MAGIC %md ## 2. Schema-aware metadata-migraties
+
+# COMMAND ----------
+
+MIGRATIONS = {
+    "metadata.meta_source_object": {
+        "schema_drift_policy": "STRING",
+        "owner_team": "STRING",
+        "criticality": "STRING",
+    },
+    "metadata.meta_dependency": {
+        "priority": "INT",
+        "retry_policy": "STRING",
+        "max_retries": "INT",
+    },
+    "metadata.meta_quality_rule": {
+        "is_blocking": "BOOLEAN",
+        "rule_group": "STRING",
+    },
+    "metadata.meta_gold_entity": {
+        "publish_status": "STRING",
+        "pointer_table": "STRING",
+        "staging_table": "STRING",
+    },
+    "audit.audit_load_run": {"metadata_version": "STRING"},
+    "audit.audit_delivery": {
+        "superseded_at": "TIMESTAMP",
+        "superseded_by": "STRING",
+        "supersede_reason": "STRING",
+        "supersede_approval_reference": "STRING",
+    },
+}
+
+
+def apply_migrations() -> None:
+    for table, columns in MIGRATIONS.items():
+        fqn = f"{settings.meta_catalog}.{table}"
+        existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {fqn}").collect()}
+        missing = [f"{name} {data_type}" for name, data_type in columns.items() if name not in existing]
+        if missing:
+            spark.sql(f"ALTER TABLE {fqn} ADD COLUMNS ({', '.join(missing)})")
+            print(f"Gemigreerd: {fqn}: {', '.join(missing)}")
+
+
+apply_migrations()
+
+# COMMAND ----------
+
+# MAGIC %md ## 3. Metadata seed laden
 
 # COMMAND ----------
 
@@ -76,7 +175,7 @@ display(spark.createDataFrame(list(counts.items()), "table string, records int")
 
 # COMMAND ----------
 
-# MAGIC %md ## 3. Metadata valideren
+# MAGIC %md ## 4. Metadata valideren
 # MAGIC Faalt bij cycli, wees-verwijzingen of ongeldige expressies.
 
 # COMMAND ----------

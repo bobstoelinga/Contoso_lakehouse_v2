@@ -66,6 +66,9 @@
     "depends_on_gold_entity_ids": ["GH_DIM_CUSTOMER"],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_customer",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_customer_v2",
     "load_order": 30,
     "is_active": true
   },
@@ -84,6 +87,9 @@
     "depends_on_gold_entity_ids": ["GH_DIM_PRODUCT"],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_product",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_product_v2",
     "load_order": 30,
     "is_active": true
   },
@@ -94,7 +100,7 @@
     "target_catalog": "contoso_gold_${env}",
     "target_schema": "current",
     "target_table": "fct_sales",
-    "select_sql": "SELECT sales_line_hk, order_hk, product_hk, customer_h+s, is_cancelled, ship_date, delivery_date FROM {gold_catalog}.historical.fct_sales_hist WHERE is_current AND NOT coalesce(is_cancelled, false)",
+    "select_sql": "SELECT sales_line_hk, order_hk, product_hk, customer_hk, order_key, order_line_number, order_date, order_status, currency_code, quantity, unit_price, discount_amount, gross_amount, net_amount, discount_rate, lead_time_days, is_cancelled, ship_date, delivery_date FROM {gold_catalog}.historical.fct_sales_hist WHERE is_current AND NOT coalesce(is_cancelled, false)",
     "business_key_columns": ["sales_line_hk"],
     "scd_type": "SNAPSHOT",
     "partition_columns": ["order_date"],
@@ -102,6 +108,9 @@
     "depends_on_gold_entity_ids": ["GH_FCT_SALES", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT"],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.fct_sales",
+    "staging_table": "contoso_gold_${env}.current_internal.fct_sales_v2",
     "load_order": 40,
     "is_active": true
   }

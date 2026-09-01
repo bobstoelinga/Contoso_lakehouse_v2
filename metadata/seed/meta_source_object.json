@@ -34,6 +34,9 @@
     "reject_table": "rj_customers",
 
     "load_order": 10,
+    "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "owner_team": "sales_domain",
+    "criticality": "HIGH",
     "is_active": true
   },
   {
@@ -71,6 +74,9 @@
     "reject_table": "rj_products",
 
     "load_order": 20,
+    "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "owner_team": "sales_domain",
+    "criticality": "HIGH",
     "is_active": true
   },
   {
@@ -108,6 +114,9 @@
     "reject_table": "rj_orders",
 
     "load_order": 30,
+    "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "owner_team": "sales_domain",
+    "criticality": "HIGH",
     "is_active": true
   }
 ]

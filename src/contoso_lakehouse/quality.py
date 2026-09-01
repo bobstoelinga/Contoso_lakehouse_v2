@@ -67,13 +67,12 @@ class QualityEngine:
                 WHERE _delivery_id = '{delivery_id}'
                 """
             )
-            evaluated = self._evaluate(source, rules).persist()
+            evaluated = self._evaluate(source, rules)
             total = evaluated.count()
             stats["rows_read"] = total
 
             breach = self._log_results(evaluated, rules, total, source_object_id)
             if breach:
-                evaluated.unpersist()
                 raise QualityThresholdBreached(
                     f"{source_object_id}: drempel overschreden voor {', '.join(breach)}"
                 )
@@ -147,7 +146,6 @@ class QualityEngine:
 
             stats["rows_inserted"] = passed.count()
             stats["rows_rejected"] = total - stats["rows_inserted"]
-            evaluated.unpersist()
             return dict(stats)
 
     def _log_results(self, df: DataFrame, rules, total: int, source_object_id: str) -> list[str]:

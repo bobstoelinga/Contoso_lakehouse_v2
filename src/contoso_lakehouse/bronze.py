@@ -14,7 +14,7 @@ from pyspark.sql import DataFrame, SparkSession, functions as F
 
 from contoso_lakehouse.audit import AuditLogger
 from contoso_lakehouse.context import RunContext
-from contoso_lakehouse.metadata import MetadataRepository, SourceObject
+from contoso_lakehouse.metadata import MetadataRepository, SourceObject, safe_identifier
 
 _DELIVERY_DATE = re.compile(r"/(\d{4}-\d{2}-\d{2})/")
 
@@ -68,34 +68,43 @@ class BronzeLoader:
         def handler(batch_df: DataFrame, _batch_id: int) -> None:
             if batch_df.isEmpty():
                 return
-            batch_df.persist()
-            try:
-                deliveries = [
-                    r["_delivery_id"]
-                    for r in batch_df.select("_delivery_id").distinct().collect()
-                ]
-                # Chronologisch verwerken; anders raakt SCD2-historie corrupt.
-                for delivery_id in sorted(deliveries):
-                    slice_df = batch_df.where(F.col("_delivery_id") == delivery_id)
-                    rows = slice_df.count()
-                    files = slice_df.select("_source_file_path").distinct().count()
-                    self._register(obj, delivery_id, slice_df)
-                    (
-                        slice_df.write.format("delta")
-                        .mode("append")
-                        .option("mergeSchema", "true")
-                        .saveAsTable(obj.bronze_table_fqn)
-                    )
-                    self.audit.set_object_status(
-                        delivery_id, obj.source_object_id, "SUCCESS",
-                        rows=rows, files=files,
-                        new_columns=self._new_columns(obj, slice_df),
-                    )
-                    self.audit.refresh_delivery_status(delivery_id)
-            finally:
-                batch_df.unpersist()
+            deliveries = [
+                r["_delivery_id"]
+                for r in batch_df.select("_delivery_id").distinct().collect()
+            ]
+            # Chronologisch verwerken; anders raakt SCD2-historie corrupt.
+            for delivery_id in sorted(deliveries):
+                slice_df = batch_df.where(F.col("_delivery_id") == delivery_id)
+                rows = slice_df.count()
+                files = slice_df.select("_source_file_path").distinct().count()
+                self._register(obj, delivery_id, slice_df)
+                self._merge_bronze_slice(obj, slice_df)
+                self.audit.set_object_status(
+                    delivery_id, obj.source_object_id, "SUCCESS",
+                    rows=rows, files=files,
+                    new_columns=self._new_columns(obj, slice_df),
+                )
+                self.audit.refresh_delivery_status(delivery_id)
 
         return handler
+
+    def _merge_bronze_slice(self, obj: SourceObject, slice_df: DataFrame) -> None:
+        """Schrijft een levering idempotent; retries mogen geen dubbele keys maken."""
+        source_view = f"_bronze_{obj.source_object_id.replace('.', '_').lower()}"
+        slice_df.createOrReplaceTempView(source_view)
+        keys = [safe_identifier(column) for column in obj.business_key_columns]
+        key_match = " AND ".join(f"t.{column} <=> s.{column}" for column in keys)
+        self.spark.sql(
+            f"""
+                        MERGE WITH SCHEMA EVOLUTION INTO {obj.bronze_table_fqn} t
+            USING {source_view} s
+              ON t._source_file_path = s._source_file_path
+             AND t._delivery_id = s._delivery_id
+             AND {key_match}
+            WHEN MATCHED THEN UPDATE SET *
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
 
     def _register(self, obj: SourceObject, delivery_id: str, df: DataFrame) -> None:
         delivery_date = delivery_id.split("|", 1)[1]
@@ -113,8 +122,25 @@ class BronzeLoader:
         return [c for c in df.columns if not c.startswith("_") and c not in mapped]
 
     # -- publieke API -----------------------------------------------------
+    def has_input_files(self, obj: SourceObject, landing_path: str) -> bool:
+        """Voorkomt een Auto Loader-fout bij een lege landingzone.
+
+        Een lege landing is bij file-arrival polling geen fout. De delivery-gate
+        besluit vervolgens dat er geen complete levering beschikbaar is.
+        """
+        return bool(
+            self.spark.read.format("binaryFile")
+            .option("pathGlobFilter", obj.file_pattern)
+            .option("recursiveFileLookup", "true")
+            .load(landing_path)
+            .limit(1)
+            .count()
+        )
+
     def load(self, source_object_id: str, landing_path: str, once: bool = True) -> None:
         obj = self.repo.source_object(source_object_id)
+        if not self.has_input_files(obj, landing_path):
+            return
         with self.audit.run("BRONZE", source_object_id):
             writer = (
                 self._read_stream(obj, landing_path)

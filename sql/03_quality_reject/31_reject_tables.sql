@@ -35,23 +35,29 @@ CREATE OR REPLACE TABLE rj_customers (
 USING DELTA
 PARTITIONED BY (_delivery_date)
 COMMENT 'Reject: afgekeurde klantrecords, herverwerkbaar.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
 
-CREATE OR REPLACE TABLE rj_products LIKE rj_customers;
+CREATE TABLE IF NOT EXISTS rj_products LIKE rj_customers;
 ALTER TABLE rj_products SET TBLPROPERTIES (comment = 'Reject: afgekeurde productrecords, herverwerkbaar.');
 
-CREATE OR REPLACE TABLE rj_orders LIKE rj_customers;
+CREATE TABLE IF NOT EXISTS rj_orders LIKE rj_customers;
 ALTER TABLE rj_orders SET TBLPROPERTIES (comment = 'Reject: afgekeurde orderregels, herverwerkbaar.');
 
 -- Operationeel overzicht voor data stewards.
 CREATE OR REPLACE VIEW v_open_rejects
 COMMENT 'Alle openstaande rejects over alle bronobjecten heen.'
 AS
-SELECT source_object_id, _delivery_id, _delivery_date, r.reason_code, r.reason_text, count(*) AS reject_count
-FROM (
+WITH open_rejects AS (
   SELECT * FROM rj_customers WHERE reject_status = 'OPEN'
-  UNION ALL SELECT * FROM rj_products  WHERE reject_status = 'OPEN'
-  UNION ALL SELECT * FROM rj_orders    WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM rj_products WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM rj_orders WHERE reject_status = 'OPEN'
 )
+SELECT source_object_id, _delivery_id, _delivery_date, r.reason_code, r.reason_text, count(*) AS reject_count
+FROM open_rejects
 LATERAL VIEW explode(failed_rules) AS r
 GROUP BY ALL;

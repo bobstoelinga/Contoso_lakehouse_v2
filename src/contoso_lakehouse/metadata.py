@@ -6,7 +6,7 @@ bronobjecten, mappings, regels of afhankelijkheden.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Iterable
 
@@ -31,15 +31,18 @@ class SourceObject:
     change_tracking_columns: list[str]
     deleted_flag_column: str | None
     is_mandatory_in_delivery: bool
-    bronze_table_fqn: str
-    bronze_partition_columns: list[str]
-    checkpoint_path: str
-    schema_location_path: str
-    schema_evolution_mode: str
-    max_files_per_trigger: int
-    quality_table_fqn: str
-    reject_table_fqn: str
-    load_order: int
+    schema_drift_policy: str = "STRICT"
+    owner_team: str = "unknown"
+    criticality: str = "MEDIUM"
+    bronze_table_fqn: str = ""
+    bronze_partition_columns: list[str] = field(default_factory=list)
+    checkpoint_path: str = ""
+    schema_location_path: str = ""
+    schema_evolution_mode: str = "addNewColumns"
+    max_files_per_trigger: int = 1000
+    quality_table_fqn: str = ""
+    reject_table_fqn: str = ""
+    load_order: int = 0
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,8 @@ class QualityRule:
     reject_reason_text: str
     execution_order: int
     threshold_pct: float | None
+    is_blocking: bool = True
+    rule_group: str = "CORE"
 
     @property
     def is_set_level(self) -> bool:
@@ -93,6 +98,9 @@ class GoldEntity:
     publication_group_id: str | None
     depends_on_gold_entity_ids: list[str]
     load_order: int
+    publish_status: str = "READY"
+    pointer_table: str | None = None
+    staging_table: str | None = None
 
 
 def _as_list(value: Any) -> list[str]:
@@ -136,6 +144,9 @@ class MetadataRepository:
                 change_tracking_columns=_as_list(r.change_tracking_columns),
                 deleted_flag_column=r.deleted_flag_column,
                 is_mandatory_in_delivery=r.is_mandatory_in_delivery,
+                schema_drift_policy=getattr(r, "schema_drift_policy", "STRICT"),
+                owner_team=getattr(r, "owner_team", "unknown"),
+                criticality=getattr(r, "criticality", "MEDIUM"),
                 bronze_table_fqn=self._fqn(r.bronze_catalog, r.bronze_schema, r.bronze_table),
                 bronze_partition_columns=_as_list(r.bronze_partition_columns),
                 checkpoint_path=self.settings.resolve(r.checkpoint_path),
@@ -184,6 +195,8 @@ class MetadataRepository:
                 reject_reason_text=r.reject_reason_text,
                 execution_order=r.execution_order,
                 threshold_pct=r.threshold_pct,
+                is_blocking=bool(getattr(r, "is_blocking", True)),
+                rule_group=getattr(r, "rule_group", "CORE"),
             )
             for r in rows
         ]
@@ -253,6 +266,9 @@ class MetadataRepository:
                 scd_type=r.scd_type,
                 publish_mode=r.publish_mode,
                 publication_group_id=r.publication_group_id,
+                publish_status=getattr(r, "publish_status", "READY"),
+                pointer_table=self.settings.resolve(getattr(r, "pointer_table", "")) or None,
+                staging_table=self.settings.resolve(getattr(r, "staging_table", "")) or None,
                 depends_on_gold_entity_ids=_as_list(r.depends_on_gold_entity_ids),
                 load_order=r.load_order,
             )

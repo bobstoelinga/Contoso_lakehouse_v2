@@ -20,11 +20,18 @@ CREATE TABLE IF NOT EXISTS audit_delivery (
       COMMENT 'Verwerkingsvolgorde. Levering N+1 mag pas starten als N COMPLETE is.',
   first_seen_at         TIMESTAMP NOT NULL,
   completed_at          TIMESTAMP,
+  superseded_at         TIMESTAMP,
+  superseded_by         STRING,
+  supersede_reason      STRING,
+  supersede_approval_reference STRING,
   CONSTRAINT pk_delivery PRIMARY KEY (delivery_id) RELY
 )
 USING DELTA
 COMMENT 'Eén rij per logische levering. De gate voor alle vervolgverwerking.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
 
 -- -----------------------------------------------------------------------------
 -- 2. Status per object binnen een levering
@@ -44,7 +51,10 @@ CREATE TABLE IF NOT EXISTS audit_delivery_object (
 )
 USING DELTA
 COMMENT 'Bronze laadstatus per object per levering.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
 
 -- -----------------------------------------------------------------------------
 -- 3. Load runs (alle lagen)
@@ -53,6 +63,7 @@ CREATE TABLE IF NOT EXISTS audit_load_run (
   run_id                STRING    NOT NULL COMMENT 'UUID per uitgevoerde stap',
   batch_id              STRING    NOT NULL COMMENT 'Groepeert alle stappen van één end-to-end run',
   delivery_id           STRING,
+  metadata_version      STRING    NOT NULL COMMENT 'SHA-256 fingerprint van de metadatarelease',
   layer                 STRING    NOT NULL COMMENT 'BRONZE | QUALITY | RAW_VAULT | BUSINESS_VAULT | GOLD_HIST | GOLD_CURR',
   entity_id             STRING    NOT NULL,
   run_status            STRING    NOT NULL COMMENT 'RUNNING | SUCCESS | FAILED | SKIPPED',
@@ -69,12 +80,57 @@ CREATE TABLE IF NOT EXISTS audit_load_run (
   CONSTRAINT pk_load_run PRIMARY KEY (run_id) RELY
 )
 USING DELTA
-PARTITIONED BY (layer)
-COMMENT 'Uitvoeringslog van elke metadata-gedreven stap.'
-TBLPROPERTIES (delta.enableChangeDataFeed = true);
+COMMENT 'Legacy snapshotregistratie; nieuwe runs schrijven append-only events.'
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
+
+CREATE TABLE IF NOT EXISTS audit_load_run_event (
+  event_id              STRING    NOT NULL,
+  run_id                STRING    NOT NULL,
+  batch_id              STRING    NOT NULL,
+  delivery_id           STRING,
+  metadata_version      STRING    NOT NULL,
+  layer                 STRING    NOT NULL,
+  entity_id             STRING    NOT NULL,
+  run_status            STRING    NOT NULL COMMENT 'RUNNING | SUCCESS | FAILED',
+  rows_read             BIGINT    NOT NULL,
+  rows_inserted         BIGINT    NOT NULL,
+  rows_updated          BIGINT    NOT NULL,
+  rows_rejected         BIGINT    NOT NULL,
+  load_date             TIMESTAMP NOT NULL,
+  started_at            TIMESTAMP NOT NULL,
+  ended_at              TIMESTAMP NOT NULL,
+  duration_seconds      DOUBLE,
+  databricks_job_run_id STRING,
+  error_message         STRING,
+  CONSTRAINT pk_load_run_event PRIMARY KEY (event_id) RELY
+)
+USING DELTA
+COMMENT 'Append-only load-run events; veilig voor gelijktijdige Serverless taken.';
+
+CREATE OR REPLACE VIEW v_load_run_status AS
+SELECT run_id, batch_id, delivery_id, metadata_version, layer, entity_id,
+       run_status, rows_read, rows_inserted, rows_updated, rows_rejected,
+       load_date, started_at, ended_at, duration_seconds, databricks_job_run_id,
+       error_message
+FROM audit_load_run_event
+QUALIFY row_number() OVER (PARTITION BY run_id ORDER BY ended_at DESC, event_id DESC) = 1;
 
 -- -----------------------------------------------------------------------------
--- 4. Kwaliteitsresultaten
+-- 4. Metadatareleases
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_metadata_version (
+  metadata_version      STRING    NOT NULL COMMENT 'SHA-256 fingerprint van alle seed-metadata',
+  deployed_at           TIMESTAMP NOT NULL,
+  CONSTRAINT pk_metadata_version PRIMARY KEY (metadata_version) RELY
+)
+USING DELTA
+COMMENT 'Onveranderlijke registratie van elke gedeployde metadatarelease.';
+
+-- -----------------------------------------------------------------------------
+-- 5. Kwaliteitsresultaten
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit_dq_result (
   dq_result_id          STRING    NOT NULL,
@@ -95,7 +151,8 @@ CREATE TABLE IF NOT EXISTS audit_dq_result (
   CONSTRAINT pk_dq_result PRIMARY KEY (dq_result_id) RELY
 )
 USING DELTA
-COMMENT 'Meetresultaat per kwaliteitsregel per run.';
+COMMENT 'Meetresultaat per kwaliteitsregel per run.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------
 -- 5. Gold Actueel publicaties (publish-by-pointer)
@@ -117,7 +174,21 @@ USING DELTA
 COMMENT 'Welke fysieke versie van een Gold Actueel dataset momenteel actief is.';
 
 -- -----------------------------------------------------------------------------
--- 6. Views voor de orchestratie-gates
+-- 6. Actieve release per Gold-publicatiegroep
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_gold_publication_group (
+  publication_group_id STRING    NOT NULL,
+  batch_id             STRING    NOT NULL,
+  delivery_id          STRING,
+  release_status       STRING    NOT NULL COMMENT 'ACTIVE | FAILED',
+  published_at         TIMESTAMP NOT NULL,
+  CONSTRAINT pk_gold_publication_group PRIMARY KEY (publication_group_id) RELY
+)
+USING DELTA
+COMMENT 'Atomische consumer-pointer per Gold Actueel publicatiegroep.';
+
+-- -----------------------------------------------------------------------------
+-- 7. Views voor de orchestratie-gates
 -- -----------------------------------------------------------------------------
 
 -- Is een levering compleet? (alle verplichte objecten SUCCESS in dezelfde datumfolder)
@@ -152,7 +223,7 @@ WITH open_deliveries AS (
   JOIN audit_delivery d USING (delivery_id)
   WHERE d.delivery_status NOT IN ('SUPERSEDED')
     AND NOT EXISTS (
-      SELECT 1 FROM audit_load_run lr
+      SELECT 1 FROM v_load_run_status lr
       WHERE lr.delivery_id = r.delivery_id
         AND lr.layer = 'GOLD_CURR' AND lr.run_status = 'SUCCESS')
 )

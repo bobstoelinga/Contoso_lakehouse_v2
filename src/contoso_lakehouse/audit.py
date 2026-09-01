@@ -22,6 +22,17 @@ class AuditLogger:
         self.ctx = ctx
         self.audit = f"{ctx.settings.meta_catalog}.audit"
 
+    def _metadata_version(self) -> str:
+      rows = self.spark.sql(
+        f"""
+        SELECT metadata_version FROM {self.audit}.audit_metadata_version
+        ORDER BY deployed_at DESC LIMIT 1
+        """
+      ).collect()
+      if not rows:
+        raise RuntimeError("Geen actieve metadatarelease geregistreerd.")
+      return rows[0].metadata_version
+
     # -- load runs --------------------------------------------------------
     @contextmanager
     def run(self, layer: str, entity_id: str):
@@ -32,44 +43,32 @@ class AuditLogger:
         """
         run_id = str(uuid.uuid4())
         started = datetime.now(timezone.utc)
-        self.spark.sql(
-            f"""
-            INSERT INTO {self.audit}.audit_load_run
-              (run_id, batch_id, delivery_id, layer, entity_id, run_status,
-               rows_read, rows_inserted, rows_updated, rows_rejected,
-               load_date, started_at, ended_at, duration_seconds,
-               databricks_job_run_id, error_message)
-            VALUES
-              ({_sql_str(run_id)}, {_sql_str(self.ctx.batch_id)},
-               {_sql_str(self.ctx.delivery_id)}, {_sql_str(layer)}, {_sql_str(entity_id)},
-               'RUNNING', 0, 0, 0, 0,
-               {self.ctx.load_date_literal}, timestamp'{started:%Y-%m-%d %H:%M:%S}',
-               NULL, NULL, {_sql_str(self.ctx.job_run_id)}, NULL)
-            """
-        )
+        metadata_version = self._metadata_version()
+        self._write_run_event(run_id, metadata_version, layer, entity_id, "RUNNING", started, {}, None)
         stats: dict[str, int] = {}
         try:
             yield stats
         except Exception as exc:  # noqa: BLE001 - fout moet altijd geregistreerd worden
-            self._finish(run_id, started, "FAILED", stats, str(exc)[:4000])
+            self._finish(run_id, metadata_version, layer, entity_id, started, "FAILED", stats, str(exc)[:4000])
             raise
         else:
-            self._finish(run_id, started, "SUCCESS", stats, None)
+            self._finish(run_id, metadata_version, layer, entity_id, started, "SUCCESS", stats, None)
 
-    def _finish(self, run_id, started, status, stats, error) -> None:
+    def _finish(self, run_id, metadata_version, layer, entity_id, started, status, stats, error) -> None:
+        self._write_run_event(run_id, metadata_version, layer, entity_id, status, started, stats, error)
+
+    def _write_run_event(self, run_id, metadata_version, layer, entity_id, status, started, stats, error) -> None:
         ended = datetime.now(timezone.utc)
         self.spark.sql(
             f"""
-            UPDATE {self.audit}.audit_load_run SET
-              run_status       = {_sql_str(status)},
-              rows_read        = {stats.get('rows_read', 0)},
-              rows_inserted    = {stats.get('rows_inserted', 0)},
-              rows_updated     = {stats.get('rows_updated', 0)},
-              rows_rejected    = {stats.get('rows_rejected', 0)},
-              ended_at         = timestamp'{ended:%Y-%m-%d %H:%M:%S}',
-              duration_seconds = {(ended - started).total_seconds():.3f},
-              error_message    = {_sql_str(error)}
-            WHERE run_id = {_sql_str(run_id)}
+            INSERT INTO {self.audit}.audit_load_run_event VALUES (
+              {_sql_str(str(uuid.uuid4()))}, {_sql_str(run_id)}, {_sql_str(self.ctx.batch_id)},
+              {_sql_str(self.ctx.delivery_id)}, {_sql_str(metadata_version)}, {_sql_str(layer)},
+              {_sql_str(entity_id)}, {_sql_str(status)}, {stats.get('rows_read', 0)},
+              {stats.get('rows_inserted', 0)}, {stats.get('rows_updated', 0)},
+              {stats.get('rows_rejected', 0)}, {self.ctx.load_date_literal},
+              timestamp'{started:%Y-%m-%d %H:%M:%S}', timestamp'{ended:%Y-%m-%d %H:%M:%S}',
+              {(ended - started).total_seconds():.3f}, {_sql_str(self.ctx.job_run_id)}, {_sql_str(error)})
             """
         )
 

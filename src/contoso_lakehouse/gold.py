@@ -47,6 +47,25 @@ class GoldLoader:
             return rows
 
     # -- Gold Actueel ------------------------------------------------------
+    def _publication_slots(self, entity: GoldEntity) -> tuple[str, str]:
+        staging_table = entity.staging_table or f"{entity.target_table}_v2"
+        staging_slot = staging_table.rsplit(".", maxsplit=1)[-1]
+        if staging_slot.endswith("_v1"):
+            base = staging_slot.removesuffix("_v1")
+        elif staging_slot.endswith("_v2"):
+            base = staging_slot.removesuffix("_v2")
+        else:
+            raise ValueError(
+                f"Staging table voor {entity.gold_entity_id} moet eindigen op _v1 of _v2."
+            )
+        return base + "_v1", base + "_v2"
+
+    def _staging_slot_fqn(self, entity: GoldEntity, slot: str) -> str:
+        staging_table = entity.staging_table
+        if staging_table:
+            return staging_table.rsplit(".", maxsplit=1)[0] + f".{safe_identifier(slot)}"
+        return f"{entity.target_catalog}.current_internal.{safe_identifier(slot)}"
+
     def _active_slot(self, entity: GoldEntity) -> str:
         row = self.spark.sql(
             f"""
@@ -54,17 +73,17 @@ class GoldLoader:
             WHERE gold_entity_id = '{entity.gold_entity_id}'
             """
         ).collect()
-        return row[0].physical_slot if row else f"{entity.target_table}_v1"
+        return row[0].physical_slot if row else self._publication_slots(entity)[0]
 
     def _target_slot(self, entity: GoldEntity) -> str:
         active = self._active_slot(entity)
-        suffix = _SLOTS[1] if active.endswith(_SLOTS[0]) else _SLOTS[0]
-        return f"{entity.target_table}_{suffix}"
+        slot_v1, slot_v2 = self._publication_slots(entity)
+        return slot_v2 if active == slot_v1 else slot_v1
 
     def build_current(self, entity: GoldEntity) -> tuple[str, int]:
         """Bouwt de nieuwe versie in het inactieve slot. Publiceert nog niet."""
         slot = self._target_slot(entity)
-        slot_fqn = f"{entity.target_catalog}.current_internal.{safe_identifier(slot)}"
+        slot_fqn = self._staging_slot_fqn(entity, slot)
         publication_id = str(uuid.uuid4())
 
         with self.audit.run("GOLD_CURR", entity.gold_entity_id) as stats:
@@ -91,20 +110,33 @@ class GoldLoader:
         return publication_id, count
 
     def publish_group(self, publication_ids: dict[str, str], entities: list[GoldEntity]) -> None:
-        """Zet alle views van een publication group in één stap om.
+        """Publiceert een publication group via één atomische releasepointer.
 
-        Wordt pas aangeroepen nadat elk slot succesvol is gebouwd, zodat
-        dimensies en feiten altijd bij elkaar horen.
+        Publieke views lezen hun slot dynamisch uit deze pointer. Daardoor is
+        één Delta MERGE voldoende om dimensies en feiten samen te publiceren.
         """
-        for entity in entities:
-            slot = self._target_slot(entity)
-            view_fqn = f"{entity.target_catalog}.current.{safe_identifier(entity.target_table)}"
-            slot_fqn = f"{entity.target_catalog}.current_internal.{safe_identifier(slot)}"
-            self.spark.sql(f"CREATE OR REPLACE VIEW {view_fqn} AS SELECT * FROM {slot_fqn}")
-
+        self._require_building_publications(publication_ids)
         audit = f"{self.ctx.settings.meta_catalog}.audit.audit_gold_publication"
         ids = ", ".join(f"'{p}'" for p in publication_ids.values())
         entity_ids = ", ".join(f"'{e.gold_entity_id}'" for e in entities)
+        publication_group_id = entities[0].publication_group_id or entities[0].gold_entity_id
+        self.spark.sql(
+            f"""
+            MERGE INTO {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_group t
+            USING (SELECT '{publication_group_id}' AS publication_group_id,
+                          '{self.ctx.batch_id}' AS batch_id,
+                          '{self.ctx.delivery_id}' AS delivery_id) s
+              ON t.publication_group_id = s.publication_group_id
+            WHEN MATCHED THEN UPDATE SET
+              batch_id = s.batch_id,
+              delivery_id = s.delivery_id,
+              release_status = 'ACTIVE',
+              published_at = current_timestamp()
+            WHEN NOT MATCHED THEN INSERT (
+              publication_group_id, batch_id, delivery_id, release_status, published_at)
+            VALUES (s.publication_group_id, s.batch_id, s.delivery_id, 'ACTIVE', current_timestamp())
+            """
+        )
         self.spark.sql(
             f"""
             UPDATE {audit} SET publication_status = 'SUPERSEDED', superseded_at = current_timestamp()
@@ -114,9 +146,24 @@ class GoldLoader:
         self.spark.sql(
             f"""
             UPDATE {audit} SET publication_status = 'ACTIVE', published_at = current_timestamp()
-            WHERE publication_id IN ({ids})
+            WHERE publication_id IN ({ids}) AND publication_status = 'BUILDING'
             """
         )
+
+    def _require_building_publications(self, publication_ids: dict[str, str]) -> None:
+        ids = ", ".join(f"'{publication_id}'" for publication_id in publication_ids.values())
+        audit = f"{self.ctx.settings.meta_catalog}.audit.audit_gold_publication"
+        row = self.spark.sql(
+            f"""
+            SELECT count(*) AS building_count
+            FROM {audit}
+            WHERE publication_id IN ({ids}) AND publication_status = 'BUILDING'
+            """
+        ).collect()[0]
+        if row.building_count != len(publication_ids):
+            raise RuntimeError(
+                "Publicatiegroep bevat geen complete set BUILDING-publicaties; pointers blijven ongewijzigd."
+            )
 
     def run_current_layer(self) -> None:
         """Bouwt en publiceert alle Gold Actueel entiteiten per publication group."""
@@ -144,7 +191,7 @@ class GoldLoader:
             f"""
             UPDATE {self.ctx.settings.meta_catalog}.audit.audit_gold_publication
             SET publication_status = 'FAILED'
-            WHERE publication_id IN ({ids})
+            WHERE publication_id IN ({ids}) AND publication_status = 'BUILDING'
             """
         )
 

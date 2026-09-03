@@ -91,3 +91,15 @@ voor de promotievoorwaarden en autorisatietests.
 Zie [docs/05_workflow_design.md](docs/05_workflow_design.md) voor de orchestratie
 en [docs/00_besluitenlog.md](docs/00_besluitenlog.md) voor de onderbouwing van de
 ontwerpkeuzes.
+
+## Documentatie voor geïnteresseerden
+
+De belangrijkste projectdocumentatie is direct beschikbaar vanuit Git:
+
+- [Volledig projectverslag](docs/06_projectverslag.md) — doel, requirements, architectuur, mijlpalen, tests, open acties en productie-readiness.
+- [LinkedIn-artikel](docs/07_linkedin_artikel.md) — publieksvriendelijke beschrijving van het conceptuele metadata-gedreven ETL-project dat met AI is ontwikkeld.
+- [Architectuuroverzicht](docs/01_architecture.md) — lagen, datastromen en fouttolerantie.
+- [Metadata-model](docs/02_metadata_model.md) — configuratietabellen, laadstrategieën en uitbreidingsproces.
+- [Data Vault 2.0](docs/04_data_vault.md) — hubs, links, satellites, historisatie en hashing.
+- [Workflow-ontwerp](docs/05_workflow_design.md) — delivery-gate, orchestration en Gold-publicatie.
+- [Besluitenlog](docs/00_besluitenlog.md) — ontwerpbesluiten, validatieresultaten en resterende acties.

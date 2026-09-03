@@ -6,7 +6,9 @@ Een metadata-gedreven ETL-platform ontwerpen klinkt overzichtelijk totdat de eer
 
 Wat gebeurt er als drie bestanden niet tegelijk binnenkomen? Hoe voorkom je dat een nieuwe bronkolom stilletjes verdwijnt? Wat doe je met afgekeurde records? En hoe zorg je ervoor dat een actuele datamart nooit een mix toont van nieuwe dimensies en oude feiten?
 
-Voor een Contoso Sales-case heb ik samen met AI een conceptuele lakehouse-oplossing uitgewerkt op Databricks, met Unity Catalog, Delta Lake, Auto Loader en Data Vault 2.0.
+Voor een Contoso Sales-case heb ik samen met AI een conceptuele lakehouse-oplossing uitgewerkt op Databricks, met Unity Catalog, Delta Lake, Auto Loader en Data Vault 2.0. Dit artikel beschrijft een leer- en ontwikkelproject, geen productieadvies.
+
+**Transparant:** dit artikel en het bijbehorende conceptuele project zijn ontwikkeld met ondersteuning van AI. AI hielp bij analyse, uitwerking en documentatie. De ontwerpkeuzes, controles en uiteindelijke beoordeling heb ik zelf gedaan.
 
 ## Meer informatie
 
@@ -68,7 +70,7 @@ Elke fout leidde tot een codefix, regressietest en een nieuw architectuurbesluit
 
 ## Wat is aangetoond?
 
-In de dev-omgeving zijn onder andere gevalideerd:
+Tijdens de ontwikkeling zijn in de beschikbare dev-omgeving onder andere de volgende onderdelen getest:
 
 - metadata-validatie vóór verwerking;
 - Bronze-fan-out met meerdere bronobjecten;
@@ -77,8 +79,8 @@ In de dev-omgeving zijn onder andere gevalideerd:
 - Raw Vault, Business Vault en Gold Historisch;
 - atomische publicatie van de actuele `SALES_MART`;
 - gecontroleerde superseding van een geblokkeerde demo-delivery;
-- 69 lokale regressietests;
-- een grote testdelivery met 1.000.000 Orders en in totaal 1.170.000 records.
+- een lokale regressiesuite met 69 geslaagde tests;
+- een grote testdelivery met 1.000.000 Orders en in totaal 1.180.000 records.
 
 ## Zijn we productieklaar?
 

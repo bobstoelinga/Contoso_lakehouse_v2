@@ -24,6 +24,9 @@ variables:
   demo_delivery_date:
     description: Datumfolder voor de handmatig gestarte demo-levering
     default: 2026-09-01
+  stress_delivery_date:
+    description: Datumfolder voor de handmatig gestarte stresslevering
+    default: 2026-09-02
   service_principal:
     description: Service principal die de workflows uitvoert
     default: 22fb388c-33eb-46a3-8031-0cb4db20209d

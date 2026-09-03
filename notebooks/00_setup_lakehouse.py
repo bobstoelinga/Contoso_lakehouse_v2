@@ -161,10 +161,31 @@ MIGRATIONS = {
     },
 }
 
+GOLD_MIGRATIONS = {
+    "historical.fct_sales_hist": {
+        "employee_hk": "STRING",
+        "order_date_key": "INT",
+        "ship_date_key": "INT",
+        "delivery_date_key": "INT",
+    },
+    "historical.fct_returns_hist": {
+        "employee_hk": "STRING",
+        "return_date_key": "INT",
+    },
+}
+
 
 def apply_migrations() -> None:
     for table, columns in MIGRATIONS.items():
         fqn = f"{settings.meta_catalog}.{table}"
+        existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {fqn}").collect()}
+        missing = [f"{name} {data_type}" for name, data_type in columns.items() if name not in existing]
+        if missing:
+            spark.sql(f"ALTER TABLE {fqn} ADD COLUMNS ({', '.join(missing)})")
+            print(f"Gemigreerd: {fqn}: {', '.join(missing)}")
+
+    for table, columns in GOLD_MIGRATIONS.items():
+        fqn = f"{settings.gold_catalog}.{table}"
         existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {fqn}").collect()}
         missing = [f"{name} {data_type}" for name, data_type in columns.items() if name not in existing]
         if missing:

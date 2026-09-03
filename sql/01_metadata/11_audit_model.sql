@@ -228,10 +228,17 @@ WITH open_deliveries AS (
   FROM v_delivery_readiness r
   JOIN audit_delivery d USING (delivery_id)
   WHERE d.delivery_status NOT IN ('QUARANTINED', 'SUPERSEDED')
+    AND r.expected_object_count = (
+      SELECT count(*)
+      FROM contoso_meta_${env}.metadata.meta_source_object
+      WHERE source_system_id = r.source_system_id
+        AND is_mandatory_in_delivery
+        AND is_active
+    )
     AND NOT EXISTS (
-      SELECT 1 FROM v_load_run_status lr
-      WHERE lr.delivery_id = r.delivery_id
-        AND lr.layer = 'GOLD_CURR' AND lr.run_status = 'SUCCESS')
+      SELECT 1 FROM audit_gold_publication_group pg
+      WHERE pg.delivery_id = r.delivery_id
+        AND pg.release_status = 'ACTIVE')
 )
 SELECT *
 FROM open_deliveries

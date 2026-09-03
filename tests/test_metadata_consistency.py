@@ -581,6 +581,58 @@ def test_demo_generator_keeps_business_dates_valid_for_future_delivery_folders()
     assert '"R-4001", "O-3001", 1, "P-2001", "E-5002", business_date' in generator
 
 
+def test_stress_generator_uses_spark_connect_safe_date_arithmetic():
+    generator = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "02_generate_stress_delivery.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'F.lit(business_date).alias("order_date")' in generator
+    assert 'F.lit(business_date).alias("customer_since")' in generator
+    assert 'F.lit(business_date).alias("hire_date")' in generator
+
+
+def test_stress_generator_supports_deterministic_phase_two_changes():
+    generator = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "02_generate_stress_delivery.py"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        Path(__file__).resolve().parents[1] / "workflows" / "stress_delivery.job.yml"
+    ).read_text(encoding="utf-8")
+
+    assert 'dbutils.widgets.text("change_set", "0")' in generator
+    assert "change_set = widget_change_set()" in generator
+    assert '((F.col("id") % 50) == 0)' in generator
+    assert '((F.col("id") % 100) == 0)' in generator
+    assert '((F.col("id") % 200) == 0)' in generator
+    assert ')).alias("is_deleted")' in generator
+    assert 'F.format_string("Customer %06d v%d", F.col("id") + 1, F.lit(change_set))' in generator
+    assert "change_set: \"{{job.parameters.change_set}}\"" in workflow
+
+
+def test_setup_migrates_gold_fact_columns_used_by_current_gold():
+    setup = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "00_setup_lakehouse.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"historical.fct_sales_hist"' in setup
+    for column in ("employee_hk", "order_date_key", "ship_date_key", "delivery_date_key"):
+        assert f'"{column}":' in setup
+
+
+def test_delivery_gate_requires_an_active_complete_gold_publication_group():
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+    processable_view = audit_ddl.split("CREATE OR REPLACE VIEW v_next_processable_delivery", 1)[1]
+    processable_view = processable_view.split("-- Laatste succesvolle business load", 1)[0]
+
+    assert "audit_gold_publication_group pg" in processable_view
+    assert "pg.release_status = 'ACTIVE'" in processable_view
+    assert "layer = 'GOLD_CURR' AND lr.run_status = 'SUCCESS'" not in processable_view
+    assert "r.expected_object_count = (" in processable_view
+    assert "meta_source_object" in processable_view
+
+
 def test_append_only_audit_event_table_has_no_column_defaults():
     audit_ddl = (
         Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"

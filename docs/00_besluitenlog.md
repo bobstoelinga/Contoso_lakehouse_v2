@@ -400,166 +400,89 @@ staat in landing klaar. Bij hervatting start de pipeline opnieuw; de
 chronologische gate kan dan deze levering selecteren voor de resterende
 end-to-end-validatie tot en met Gold Actueel.
 
-### B-35 — Review 1 september 2026: Quarantine-pad bevat een P0-defect
-**Bevinding:** `AuditLogger.quarantine_delivery()` is in
-`refresh_delivery_status()` genest door zijn inspringing. Het is daardoor geen
-methode van `AuditLogger`. Een regel met `on_threshold_breach =
-QUARANTINE_BATCH` roept een `AttributeError` op nadat Quality al data heeft
-weggeschreven, in plaats van de levering gecontroleerd als `QUARANTINED` te
-registreren.
+### B-35 — Stresstest dekt alle huidige Sales-tabellen van volume tot Gold
+**Besluit (2 september 2026):** voer een positieve end-to-end stresstest uit
+als reeks van tien opeenvolgende dagleveringen. Per levering bevat de landing
+100.000 `customers`, 50.000 `products`, 10.000 `employees`, 1.000.000
+`orders`-regels en 20.000 `returns`, verdeeld over minimaal tien bestanden per
+object en honderd bestanden voor Orders. De reeks bevat daarmee 11,8 miljoen
+bronrijen en belast zowel bestandsfan-out als alle volledige Gold-rebuilds.
 
-**Aanbeveling (P0):** maak `quarantine_delivery()` onmiddellijk een publieke
-methode van `AuditLogger`, voeg een unit-test voor de gegenereerde `UPDATE` toe
-en voer daarna een end-to-end-proef met een echte `QUARANTINE_BATCH`-regel uit.
-Voor productie mag de remediation-job pas worden vrijgegeven nadat die proef de
-status, reden en heropening volledig traceerbaar toont.
-→ [src/contoso_lakehouse/audit.py](../src/contoso_lakehouse/audit.py),
-[src/contoso_lakehouse/quality.py](../src/contoso_lakehouse/quality.py)
+| Brontabel | Wijziging per volgende levering | Verplichte downstream-dekking |
+|---|---:|---|
+| `customers` | 2% gewijzigd of verwijderd | `HUB_CUSTOMER`, `SAT_CUSTOMER`, `SAT_CUSTOMER_BV`, `GH_DIM_CUSTOMER`, `GC_DIM_CUSTOMER` |
+| `products` | 1% gewijzigd of verwijderd | `HUB_PRODUCT`, `SAT_PRODUCT`, `GH_DIM_PRODUCT`, `GC_DIM_PRODUCT` |
+| `employees` | 0,5% gewijzigd of verwijderd | `HUB_EMPLOYEE`, `SAT_EMPLOYEE`, `GH_DIM_EMPLOYEE`, `GC_DIM_EMPLOYEE` |
+| `orders` | nieuwe regels en statuswijzigingen | `HUB_ORDER`, `LNK_ORDER_CUSTOMER`, `LNK_ORDER_PRODUCT`, `LNK_ORDER_EMPLOYEE`, `SAT_ORDER`, `SAT_ORDER_LINE`, `SAT_ORDER_LINE_BV`, `GH_FCT_SALES`, `GC_FCT_SALES` |
+| `returns` | 2% van de orderregels | `HUB_RETURN`, `LNK_RETURN_ORDER_PRODUCT`, `LNK_RETURN_EMPLOYEE`, `SAT_RETURN`, `GH_FCT_RETURNS`, `GC_FCT_RETURNS` |
 
-### B-36 — Review 1 september 2026: Quality is niet retry-idempotent
-**Bevinding:** iedere Quality-run schrijft zowel passed- als reject-records met
-`mode("append")`. Bij een taakretry of een opnieuw gestarte batch worden de
-records van dezelfde `delivery_id` opnieuw weggeschreven. De Vault leest daarna
-de hele levering; deduplicatie is daar slechts deels en entiteitspecifiek
-aanwezig. Rejects krijgen bovendien een nieuwe UUID en zijn daardoor altijd
-dubbel.
+Gebruik uitsluitend geldige sleutels en referenties in deze positieve stroom.
+De test slaagt wanneer iedere levering binnen de afgesproken SLA de volledige
+`SALES_MART`-publicatiegroep activeert, Gold-rijtotalen en bedragen herleidbaar
+zijn tot Quality, geen dubbele business keys of satelliteversies ontstaan en
+alle Current-Gold views dezelfde actieve `batch_id` en `delivery_id` tonen.
 
-**Aanbeveling (P1):** introduceer een stabiele `quality_run_id` per
-`delivery_id + metadata_version` of een deterministische recordfingerprint.
-Schrijf Quality en Reject atomisch/idempotent via `MERGE`, of verwijder eerst
-uitsluitend de eigen `delivery_id` en `metadata_version` binnen een transactie.
-Leg de gekozen semantiek vast voor reruns met gewijzigde metadata, zodat een
-historische kwaliteitsuitkomst reproduceerbaar blijft.
-→ [src/contoso_lakehouse/quality.py](../src/contoso_lakehouse/quality.py)
+Naast de positieve volumestroom zijn de volgende gecontroleerde proeven
+verplicht. Elke proef gebruikt een eigen, chronologisch latere deliverydatum,
+zodat eerdere resultaten en Auto Loader-checkpoints niet worden gemuteerd.
 
-### B-37 — Review 1 september 2026: Metadata en DDL zijn nog niet volledig inventory-schaalbaar
-**Bevinding:** bron- en transformatielogica zijn metadata-gedreven, maar de
-fysieke Quality/Reject-, Vault- en Gold-DDL bevat nog expliciete Contoso
-entiteiten. Ook `v_open_rejects` bevat een vaste `UNION ALL` over drie
-rejecttabellen. Een nieuw bronobject vereist dus alsnog DDL- en
-monitoringwijzigingen; dit strijdt met de beheerambitie voor honderden tabellen.
+| Proef | Injectie | Verwachte controle |
+|---|---|---|
+| Delivery-gate | Eén verplicht bestand ontbreekt of arriveert later | Geen Quality/Vault/Gold-run; na aanvulling opent uitsluitend de volledige levering. |
+| Chronologie | Datum $N+1$ is volledig, datum $N$ onvolledig | De gate verwerkt $N+1$ niet voordat $N$ is gepubliceerd of gecontroleerd gesuperseded. |
+| Quality en Reject | Geldige levering met gerichte null, duplicate en referentiële fout | Correcte regelresultaten, payload en reden in Reject; `FAIL_BATCH` blokkeert vervolg en `QUARANTINE_BATCH` bewaart de reden. |
+| Schema drift | Nieuwe niet-gemapte bronkolom | Bronze registreert de nieuwe kolom en faalt volgens het driftbeleid, zonder gedeeltelijke vervolgverwerking. |
+| Raw Vault | Nieuwe en bestaande business keys, gewijzigde hashdiffs en relaties | Hubs en links zijn uniek op hun hash key; satellites zijn insert-only en voegen alleen gewijzigde hashdiffs toe. |
+| SCD2 en deletes | Gewijzigde en verdwenen Customers, Products en Employees | Historische Gold-rijen krijgen correcte `valid_from`, `valid_to` en `is_current`; Current Gold toont alleen de actuele, niet-verwijderde versie. |
+| Business Vault | Gewijzigde adressen, bedragen, korting, status en leverdatum | Afgeleide customer- en order-line-satellites wijzigen alleen wanneer hun eigen hashdiff verandert; berekende Gold-waarden sluiten aan op Quality. |
+| Herstart/idempotentie | Onderbreek na Bronze, Quality en per Vault-zone; herstart met dezelfde batch | Geen dubbele Bronze-, Quality- of Vault-rijen; audit eindigt in `SUCCESS` voor de herstelde run. |
+| Gold-publicatie | Forceer fout tijdens een Current-Gold-build | Geen groepspointerwissel; alle publieke Current-views houden de vorige gezamenlijke `batch_id` en `delivery_id`. |
+| Fan-out en audit | Honderd Order-bestanden en gelijktijdige Bronze-objecten | Geen audit-concurrencyconflicten; alle verplichte objecten zijn exact eenmaal `SUCCESS` voordat de gate opent. |
 
-**Aanbeveling (P1):** voeg een provisioningstap toe die vanuit metadata de
-fysieke laagcontracten, publieke views en monitoringinventaris genereert.
-Gebruik één generieke rejecttabel met `source_object_id`, of genereer de view
-per inventory-versie. Beheer schemawijzigingen als compatibele contractmigraties
-en valideer de gegenereerde DDL in CI vóór deployment.
-→ [sql/03_quality_reject/31_reject_tables.sql](../sql/03_quality_reject/31_reject_tables.sql),
-[sql/04_data_vault/40_raw_vault.sql](../sql/04_data_vault/40_raw_vault.sql),
-[sql/05_gold/51_gold_current.sql](../sql/05_gold/51_gold_current.sql)
+**Opschalen naar productie:** vervang het startprofiel bij beschikbare
+piekmetingen door minimaal drie maal de grootste verwachte daglevering, met
+dezelfde bestandsverdeling en wijzigingspercentages. Test incomplete leveringen,
+DQ-drempeloverschrijding, schema drift, herstart na een fout en een mislukte
+Gold-build apart; die moeten respectievelijk de gate sluiten, quarantainen,
+veilig falen, idempotent herstellen en de voorgaande Gold-release zichtbaar
+houden.
 
-### B-38 — P0- en Quality-retryherstel gevalideerd
-**Uitvoering (1 september 2026):** `quarantine_delivery()` is hersteld als
-publieke methode van `AuditLogger`; de Quality-engine kan een overschreden
-`QUARANTINE_BATCH`-regel daardoor traceerbaar op de levering registreren. Vóór
-een nieuwe succesvolle Quality-uitvoer verwijdert de engine uitsluitend de
-bestaande Quality- en Reject-records voor dezelfde `delivery_id` en hetzelfde
-bronobject. Een retry dupliceert deze outputs daarom niet meer.
+**Kostenraming:** de pipeline gebruikt Serverless Jobs; er zijn geen permanente
+job-clusters. De kosten zijn daarom hoofdzakelijk
+`verbruikte Serverless-DBU-uren x de contractprijs per DBU-uur`, aangevuld met
+ADLS-opslag, read/write/list-transacties en eventueel netwerk-egress. Meet eerst
+één representatieve levering met 1.000.000 orderregels en alle vijf objecten.
+Vermenigvuldig de gemeten DBU-kosten met tien voor de positieve reeks en tel
+20% reservering voor negatieve herstelproeven en run-to-runvariatie op. Gebruik
+de werkelijk gefactureerde usage-records uit Databricks system billing als
+bron; de DBU-prijs verschilt per Azure-regio en enterprisecontract. Begrens
+kosten vooraf met een testbudget, `max_concurrent_runs: 1` en de bestaande
+`bronze_parallelism: 4`.
 
-**Validatie:** de gerichte regressiesuite voor quarantine en Quality-retry
-slaagde met 5 tests. Een volledige pipeline-proef met `QUARANTINE_BATCH` blijft
-nodig om de statusovergang in Databricks zelf te bevestigen.
-→ [src/contoso_lakehouse/audit.py](../src/contoso_lakehouse/audit.py),
-[src/contoso_lakehouse/quality.py](../src/contoso_lakehouse/quality.py),
-[tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py)
+**Resultatenlog:** na iedere uitvoering worden hieronder uitsluitend gemeten
+waarden genoteerd: datumfolder, job-run-id, duur per laag, verbruikte
+Serverless-DBU-uren, ingelezen/afgekeurde/gepubliceerde rijtotalen, actieve
+Gold `batch_id` en `delivery_id`, en de uitkomst van elke negatieve proef.
 
-### B-39 — Omgevingen delen één workspace, maar niet hun data- of control-plane
-**Besluit (1 september 2026):** `dev`, `tst` en `prd` blijven bewust in dezelfde
-Databricks-workspace. Unity Catalog dwingt de scheiding af: de catalog is de
-omgevingsgrens, het schema is de functionele-laaggrens en een Gold-tabel of
--view is de consumptiegrens. Eigen external volumes en bundle-rootpaden maken
-deze rechtenstructuur operationeel. Dit houdt beheer, observability en
-kostencontrole centraal.
-
-**Landingisolatie:** `landing_path` is een expliciete bundlevariabele. De
-bestaande developmentlocatie blijft `sales`; `tst` en `prd` gebruiken
-respectievelijk `sales/tst` en `sales/prd`. De setup geeft de waarde door aan de
-external-volume-DDL. Per productieomgeving blijft een eigen storage credential
-en external location verplicht, ook wanneer dezelfde storage account wordt
-gebruikt.
-
-**Promotievoorwaarde:** `dev` gebruikt gebruikers-OAuth; `tst` en `prd` draaien
-alleen onder de service principal en ontvangen deploys vanuit CI/CD. Wijzigingen
-promoveren uitsluitend na een schone end-to-end-proef in `tst`, goedgekeurde
-metadatarelease en geslaagde bundlevalidatie. De standaard-CLI-token is lokaal
-ongeldig; `databricks bundle validate -t dev --profile contoso-dev` is wel
-succesvol gevalideerd.
-→ [databricks.yml](../databricks.yml),
-[notebooks/00_setup_lakehouse.py](../notebooks/00_setup_lakehouse.py),
-[sql/00_unity_catalog/00_catalogs_schemas_volumes.sql](../sql/00_unity_catalog/00_catalogs_schemas_volumes.sql)
-
-### B-40 — Shared workspace hanteert Unity Catalog als autorisatiegrens
-**Besluit (1 september 2026):** een gedeelde runtime- of deploymentidentity is
-toegestaan wanneer die identity bewust voor meerdere omgevingen wordt beheerd.
-De omgevingsscheiding voor gebruikers en consumers wordt niet door de workspace
-of identitynaam afgedwongen, maar door Unity Catalog grants op catalog en
-schema. Voor Gold geldt aanvullend `SELECT` op expliciet goedgekeurde tabellen
-en views.
-
-**Beheermaatregel:** leg bij iedere promotie `SHOW GRANTS`-resultaten vast voor
-de betrokken catalog, schema's, volumes en Gold-objecten. Een aparte runtime
-service principal per omgeving blijft beschikbare defense-in-depth, maar is
-geen releaseblokkade binnen dit gekozen model.
-
-### B-41 — Gold-consumptie is op objectniveau beperkt
-**Besluit (1 september 2026):** omgevingsscheiding is een Unity Catalog-model:
-catalogrechten vormen de omgevingsgrens, schemarechten de functionele grens en
-Gold-objectrechten de consumptiegrens. De BI-groep krijgt alleen `USE CATALOG`
-en `USE SCHEMA` op Gold. `SELECT` is expliciet toegekend op de drie historische
-tabellen en vier publieke actuele Gold-views. De fysieke slots in
-`current_internal` krijgen geen BI-rechten.
-
-**Uitvoering:** het nieuwe script met Gold-objectgrants draait na de Gold-DDL.
-De setup blijft daardoor idempotent en een nieuw object is pas leesbaar na een
-expliciete, gereviewde grantwijziging. Dit is tevens een releasecontrole totdat
-metadata-gedreven provisioning is gerealiseerd.
-→ [sql/00_unity_catalog/01_grants.sql](../sql/00_unity_catalog/01_grants.sql),
-[sql/00_unity_catalog/02_gold_consumer_grants.sql](../sql/00_unity_catalog/02_gold_consumer_grants.sql),
-[notebooks/00_setup_lakehouse.py](../notebooks/00_setup_lakehouse.py)
-
-### B-42 — Historische Gold-laadstrategie is insert-only
-**Bevinding (1 september 2026):** twee development-pipeline-runs bereikten
-succesvol Bronze, Quality, Raw Vault en Business Vault. De daaropvolgende Gold
-Historisch-taak bleef langdurig actief zonder foutmelding; beide runs zijn
-gecontroleerd geannuleerd voordat Gold Actueel kon starten. De loader las bij
-elke run de volledige Vault-historie en voerde `WHEN MATCHED THEN UPDATE SET *`
-uit, ook voor onveranderlijke SCD2-versies.
-
-**Besluit:** Gold Historisch volgt dezelfde immutable-SCD2-semantiek als de
-Vault: een rij met dezelfde business key en `valid_from` wordt nooit door een
-reguliere batch gewijzigd. De `MERGE` voegt daarom alleen niet-bestaande versies
-in. Correcties op een al gepubliceerde historische versie vragen een expliciete,
-auditeerbare rebuild of contractmigratie. Dit voorkomt Delta-file rewrites bij
-elke rerun en beperkt write amplification aanzienlijk.
-
-**Validatie:** de nieuwe unit-test bevestigt dat de gegenereerde SQL uitsluitend
-`WHEN NOT MATCHED THEN INSERT` bevat. De geoptimaliseerde bundle moet nog in
-`dev` end-to-end tot en met Gold Actueel worden gevalideerd.
-→ [src/contoso_lakehouse/gold.py](../src/contoso_lakehouse/gold.py),
-[tests/test_metadata_consistency.py](../tests/test_metadata_consistency.py)
-
-### B-43 — Retouren, medewerkers en kalender verrijken de Sales-mart
-**Besluit (1 september 2026):** `returns` is volledig als end-to-end feit
-gemodelleerd. De bron behoudt de relatie met de oorspronkelijke orderregel en
-product; Gold publiceert `fct_returns` met retourdatum, retourreden en
-terugbetalingsbedrag. De medewerker die een verkoop of retour behandelt komt uit
-de SCD2-bron `employees` en wordt via expliciete Vault-links gekoppeld aan beide
-feiten. `dim_date` is een vaste, gegenereerde kalender voor 2020-2030; verkoop
-bevat order-, verzend- en leverdatumkeys en retouren bevatten een retourdatumkey.
-
-**Uitvoeringswaarborg:** Quality verwerkt klanten, producten en medewerkers vóór
-orders en retouren, zodat alle referentiële regels tegen dezelfde levering
-valideren. Alle nieuwe actuele Gold-objecten nemen deel aan dezelfde atomische
-`SALES_MART`-publicatiegroep.
-
-**Validatie:** de lokale metadata-consistentiesuite is geslaagd met 64 tests.
-De volgende operationele stap is `bundle run setup_lakehouse -t dev` gevolgd
-door een nieuwe volledige pipeline-run; de Gold-selects moeten daar met
-Databricks `EXPLAIN` en de fysieke Delta-contracten worden gevalideerd.
-→ [metadata/seed](../metadata/seed),
-[sql/04_data_vault/40_raw_vault.sql](../sql/04_data_vault/40_raw_vault.sql),
-[sql/05_gold](../sql/05_gold),
-[notebooks/01_generate_demo_delivery.py](../notebooks/01_generate_demo_delivery.py)
+| Uitvoering | Status | Gemeten resultaat |
+|---|---|---|
+| 2 september 2026, generatorrun `74226457869886` | Veilig gestopt | Geen data geschreven. Na 49 seconden meldde de generator dat `/Volumes/raw_dev/sales/landing/2026-09-02` al bestond; overschrijven is correct geweigerd. |
+| 2 september 2026, generatorrun `315473211182482` | Veilig gestopt | Geen data geschreven. Na 24 seconden meldde de generator dat `/Volumes/raw_dev/sales/landing/2026-09-03` al bestond; overschrijven is correct geweigerd. |
+| 2 september 2026, generatorrun `826080059378600` | Technisch gefaald | Geen bronbestand geschreven. Serverless Spark Connect ondersteunt write-modus `errorifexists` niet; de generator is hersteld naar `overwrite` voor uitsluitend de tijdelijke stagingfolder. |
+| 2 september 2026, generatorrun `816898969720412` | Technisch gefaald | Geen bronbestand geschreven. Serverless vereiste een `INT` als `element_at`-index, terwijl de index uit `range.id` een `BIGINT` was; de generator cast de vier indexen nu expliciet naar `INT`. |
+| 2 september 2026, generatorrun `291249352899112` | Succes | Levering `2026-09-04` is in 104 seconden geschreven met 100.000 Customers, 50.000 Products, 10.000 Employees, 1.000.000 Orders en 20.000 Returns. De 140 verwachte Parquet-bestanden zijn aangemaakt; DBU-usage is nog op te halen uit system billing. |
+| 2 september 2026, pipelinerun `112566148879705` | Bewust geblokkeerd | Bronze (vijf objecten) en de delivery-gate slaagden. Quality blokkeerde Orders op `order_date_not_future`; de eerste poging faalde na 69 seconden en de identieke automatische retry is gestopt om onnodige DBU-kosten te voorkomen. Geen Vault- of Gold-taak is gestart. De generator gebruikt voortaan een afzonderlijke, gevalideerde `business_date`. |
+| 2 september 2026, remediationrun `555230881632015` | Succes | `SALES|2026-09-04` is gecontroleerd als `SUPERSEDED` geregistreerd. Reden: de representatieve stresstest was bewust geblokkeerd door `order_date_not_future`; de positieve opvolglevering gebruikt een gescheiden `business_date`. Goedgekeurd door `stoelingabob@gmail.com`, referentie `B-35`. |
+| 2 september 2026, generatorrun `842841385799462` | Succes | Positieve opvolglevering `2026-09-05` is in 85 seconden geschreven met de standaardvolumes en `business_date=2024-09-02`. Daarna volgt verwerking door `contoso_lakehouse_pipeline`. |
+| 2 september 2026, pipelinerun `839588986339164` | Gefaald op Quality | De gate selecteerde aantoonbaar `SALES|2026-09-05`; metadata-validatie, Bronze-fan-out met vijf objecten en de gate slaagden. Quality faalde na twee pogingen op `order_date_not_future`; Raw Vault, Business Vault, Gold Historisch en Gold Actueel zijn correct niet gestart. Read-only query `01f1a68b-626e-154e-b760-4df1b3ce9742` toonde 1.000.000 Bronze-Orders met `min_order_date=NULL`, `max_order_date=NULL` en nul toekomstige datums. Oorzaak: datumgeneratie met een kolomargument gaf onder Spark Connect NULL terug; hersteld met expliciete Spark SQL-expressies. |
+| 2 september 2026, remediationrun `832642036027967` | Succes | `SALES|2026-09-05` is gecontroleerd als `SUPERSEDED` geregistreerd wegens de bewezen NULL `order_date`-waarden. Goedgekeurd door `stoelingabob@gmail.com`, referentie `B-35`; de gecorrigeerde positieve levering krijgt een nieuwe datumfolder. |
+| 2 september 2026, generatorrun `193601309737521` | Succes | Gecorrigeerde positieve levering `2026-09-06` is in 83 seconden geschreven met de standaardvolumes en `business_date=2024-09-02`. De nieuwe Spark SQL-datumexpressies worden in de volgende pipeline-run gevalideerd. |
+| 2 september 2026, generatorrun `457189887708000` | Succes | Delivery `SALES|2026-09-09` is gegenereerd met standaardvolumes en ISO-datumstrings, passend bij het bestaande Auto Loader-schema. |
+| 2 september 2026, pipelinerun `138888199822102` | Succes | Delivery `SALES|2026-09-09` volledig verwerkt: metadata, Bronze, gate, Quality, Raw Vault, Business Vault, Gold Historisch en Gold Current. De volledige `SALES_MART`-publication group is atomisch `ACTIVE`. |
+| 2 september 2026, pipelinerun `321288909336916` | Succes | Delivery `SALES|2026-09-10` volledig verwerkt met dezelfde end-to-end dekking. |
+| 2 september 2026, generatorrun `355108901666945` | Succes | Fase 2-testdata `SALES|2026-09-11` gegenereerd met `change_set=1`; generator ondersteunt deterministische wijzigingen, deletes, nieuwe orderkeys en statuswijzigingen. |
+| 2 september 2026, pipelineruns `991506170448924` en `331340688817919` | Niet geldig als Fase 2-acceptatie | De runs eindigden technisch succesvol, maar de chronologische gate verwerkte opnieuw `SALES|2026-09-09` in plaats van de gewijzigde delivery. De runs bewijzen daarom geen SCD2/delete-verwerking voor `change_set=1`. |
+| 2 september 2026, technische fixes | Opgelost | Gold-schema-migraties toegevoegd voor bestaande facttabellen; de delivery-gate vereist nu een actieve volledige Gold-publication group en sluit legacy deliveries met een verouderd objectcontract uit. Lokale regressiesuite: 69 tests geslaagd. |
 
 ---
 
@@ -604,13 +527,10 @@ Databricks `EXPLAIN` en de fysieke Delta-contracten worden gevalideerd.
 | 17 | Unity Catalog external location voor ADLS-landing ontbreekt | P0 | Opgelost (B-17) |
 | 18 | File-arrival-trigger vereiste afsluitende slash | P1 | Opgelost (B-19) |
 | 19 | DDL-runner sloeg statements na SQL-commentaar over | P1 | Opgelost (B-19) |
-| 20 | `QUARANTINE_BATCH` kan de delivery-status niet zetten | P0 | Opgelost (B-38) |
-| 21 | Quality- en rejectschrijfsels zijn niet idempotent bij retry | P1 | Opgelost (B-38) |
-| 22 | Fysieke contracten en reject-monitoring zijn deels hardcoded | P1 | **Open** (B-37) |
-| 23 | Omgevingen deelden dezelfde ADLS-landinglocatie | P0 | Opgelost (B-39) |
-| 24 | Autorisatiegrens voor gedeelde workspace expliciet vastgelegd | P1 | Opgelost (B-40) |
-| 25 | Gold-consumenten konden schema-breed lezen | P1 | Opgelost (B-41) |
-| 26 | Gold Historisch herschreef onveranderlijke SCD2-versies bij iedere run | P1 | Opgelost in code; dev E2E open (B-42) |
+| 20 | Bestaande Gold-tabellen liepen achter op de actuele DDL | P1 | Opgelost — idempotente schema-migraties toegevoegd |
+| 21 | Delivery-gate sloot deliveries met gedeeltelijke Gold-success ten onrechte af | P1 | Opgelost — gate gebruikt volledige actieve publication group |
+| 22 | Historische deliveries met oud metadata-contract blokkeerden de huidige gate | P1 | Opgelost — actuele mandatory-object count is onderdeel van gate-selectie |
+| 23 | Stressgenerator ondersteunde geen reproduceerbare wijzigingen en deletes | P2 | Opgelost — `change_set` toegevoegd; runtime-validatie van gewijzigde delivery staat open |
 
 ## 6. Openstaande punten
 
@@ -627,34 +547,16 @@ Databricks `EXPLAIN` en de fysieke Delta-contracten worden gevalideerd.
    beoordeelt, binnen welke termijn, en hoe wordt teruggevoerd) is nog niet belegd.
 6. **Effectivity satellite wordt nog niet geladen.** De tabel bestaat, de
    loadlogica voor het `DRIVING_KEY`-patroon moet nog worden toegevoegd.
-7. **`QUARANTINE_BATCH` end-to-end valideren (P1).** Herstelde unit-tests
-   bewaken de code; een Databricks-proef moet de delivery-status, reden en
-   gecontroleerde vrijgave nog aantonen.
-8. **Metadata-gedreven provisioning (P1).** DDL, publieke views en monitoring
-   genereren vanuit een gevalideerde inventory voordat tientallen bronsystemen
-   worden aangesloten.
-9. **Single-workspace grants valideren (P1).** Leg per doelgroep met
-   `SHOW GRANTS` vast dat catalog-, schema-, volume- en Gold-objectrechten
-   overeenkomen met het autorisatiemodel.
-10. **Gold Historisch end-to-end valideren (P1).** Bevestig in `dev` dat de
-   insert-only strategie de pipeline doorlaat tot en met Gold Actueel en de
-   groepspointer publiceert.
 
 ## 7. Vervolgstappen
 
-1. `databricks bundle run setup_lakehouse -t dev --profile contoso-dev` opnieuw
-   uitvoeren; de bundle is al succesvol gedeployed en de landing-voorwaarde is
-   gevalideerd.
-2. Testlevering in `/Volumes/raw_dev/sales/landing/<yyyy-MM-dd>/` plaatsen en de
-   pipeline end-to-end valideren.
-3. De resterende P2-punten prioriteren: CDC, governance-metadata, de grote
+1. Fase 2 afronden: laat de gate eerst `SALES|2026-09-10` verwerken en daarna
+   `SALES|2026-09-11` met `change_set=1`; accepteer pas na controle van SCD2,
+   deletes, hashdiffs en Current Gold.
+2. De positieve reeks uitbreiden tot tien opeenvolgende deliveries volgens B-35,
+   met echte wijzigingen en deletes vanaf de tweede delivery.
+3. Daarna de negatieve proeven uitvoeren: incomplete delivery, chronologie,
+   Quality/Reject, schema drift, herstart/idempotentie, Gold-publicatiefout en
+   fan-out/audit-concurrency.
+4. De resterende P2-punten prioriteren: CDC, governance-metadata, de grote
    fan-out inventory, reject-herverwerking en effectivity satellites.
-4. Een end-to-end-validatie van `QUARANTINE_BATCH` uitvoeren, inclusief
-   gecontroleerde vrijgave vanuit quarantaine.
-5. Metadata-gedreven provisioning als releasevoorwaarde voor de
-   enterprise-uitrol ontwerpen en realiseren.
-6. De `tst`-promotie met de service principal uitvoeren en de Unity Catalog
-   grants voor catalog, schema, volume en Gold-objecten als release-evidence
-   vastleggen.
-7. De geoptimaliseerde Gold Historisch-laag naar `dev` deployen en de volledige
-   pipeline-run inclusief Gold Actueel verifiëren.

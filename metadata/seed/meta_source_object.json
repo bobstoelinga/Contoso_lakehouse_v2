@@ -322,7 +322,7 @@
     "quality_catalog": "contoso_quality_${env}", "quality_schema": "fabric_sales", "quality_table": "qa_order_lines",
     "reject_catalog": "contoso_reject_${env}", "reject_schema": "fabric_sales", "reject_table": "rj_order_lines",
     "reference_catalog": "contoso_vault_${env}", "reference_schema": "business_vault", "reference_table": "ref_fabric_sales_order_lines_h",
-    "load_order": 10, "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    "load_order": 10, "schema_drift_policy": "RESCUE",
     "owner_team": "sales_domain", "criticality": "HIGH", "is_active": true
   }
 ]

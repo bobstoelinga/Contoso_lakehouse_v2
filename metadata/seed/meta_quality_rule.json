@@ -352,5 +352,46 @@
     "reject_reason_code": "R035", "reject_reason_text": "Retour verwijst naar een onbekende medewerker.",
     "execution_order": 60, "threshold_pct": 0.0, "is_blocking": true,
     "rule_group": "REFERENCE_INTEGRITY", "is_active": true
-  }
+  },
+  {
+    "rule_id": "DQ-CBS-001", "source_object_id": "CBS.JEUGDZORG_WIJK_2025", "rule_name": "cbs_business_key_not_null",
+    "rule_type": "NOT_NULL", "target_columns": ["vorm_code", "wijk_code", "periode_code"],
+    "rule_expression": "vorm_code IS NOT NULL AND vorm_code <> '' AND wijk_code IS NOT NULL AND wijk_code <> '' AND periode_code IS NOT NULL AND periode_code <> ''", "severity": "ERROR",
+    "reject_reason_code": "CBS001", "reject_reason_text": "CBS vorm-, wijk- of periodecode ontbreekt.",
+    "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true,
+    "rule_group": "CORE_VALIDATION", "is_active": true
+  },
+  {
+    "rule_id": "DQ-CBS-002", "source_object_id": "CBS.JEUGDZORG_WIJK_2025", "rule_name": "cbs_measure_non_negative",
+    "rule_type": "RANGE", "target_columns": ["jongeren_totaal", "trajecten_totaal"],
+    "rule_expression": "(jongeren_totaal IS NULL OR jongeren_totaal >= 0) AND (trajecten_totaal IS NULL OR trajecten_totaal >= 0)", "severity": "ERROR",
+    "reject_reason_code": "CBS002", "reject_reason_text": "CBS-jeugdzorgmaatregel bevat een negatieve waarde.",
+    "execution_order": 20, "threshold_pct": 0.0, "is_blocking": true,
+    "rule_group": "CORE_VALIDATION", "is_active": true
+  },
+  {
+    "rule_id": "DQ-ECB-001", "source_object_id": "ECB.EXCHANGE_RATE", "rule_name": "ecb_business_key_not_null",
+    "rule_type": "NOT_NULL", "target_columns": ["currency_code", "rate_date"],
+    "rule_expression": "currency_code IS NOT NULL AND currency_code <> '' AND rate_date IS NOT NULL", "severity": "ERROR",
+    "reject_reason_code": "ECB001", "reject_reason_text": "ECB-valuta of koersdatum ontbreekt.",
+    "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true,
+    "rule_group": "CORE_VALIDATION", "is_active": true
+  },
+  {
+    "rule_id": "DQ-ECB-002", "source_object_id": "ECB.EXCHANGE_RATE", "rule_name": "ecb_rate_positive",
+    "rule_type": "RANGE", "target_columns": ["rate_to_eur"],
+    "rule_expression": "rate_to_eur IS NOT NULL AND rate_to_eur > 0", "severity": "ERROR",
+    "reject_reason_code": "ECB002", "reject_reason_text": "ECB-koers ontbreekt of is niet positief.",
+    "execution_order": 20, "threshold_pct": 0.0, "is_blocking": true,
+    "rule_group": "CORE_VALIDATION", "is_active": true
+  },
+  { "rule_id": "DQ-SPA-001", "source_object_id": "SHAREPOINT.PRICE_AGREEMENTS", "rule_name": "agreement_key_and_dates_valid", "rule_type": "CUSTOM_SQL", "target_columns": ["agreement_id", "valid_from", "valid_to"], "rule_expression": "agreement_id IS NOT NULL AND agreement_id <> '' AND valid_from IS NOT NULL AND (valid_to IS NULL OR valid_to >= valid_from)", "severity": "ERROR", "reject_reason_code": "SPA001", "reject_reason_text": "Prijsafspraak mist een sleutel of heeft een ongeldig geldigheidsinterval.", "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-SPA-002", "source_object_id": "SHAREPOINT.PRICE_AGREEMENTS", "rule_name": "agreement_price_and_discount_valid", "rule_type": "RANGE", "target_columns": ["list_price", "discount_pct"], "rule_expression": "list_price IS NOT NULL AND list_price >= 0 AND discount_pct IS NOT NULL AND discount_pct BETWEEN 0 AND 100", "severity": "ERROR", "reject_reason_code": "SPA002", "reject_reason_text": "Prijs of kortingspercentage valt buiten het geldige bereik.", "execution_order": 20, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-SPB-001", "source_object_id": "SHAREPOINT.SALES_BUDGETS", "rule_name": "budget_business_key_not_null", "rule_type": "NOT_NULL", "target_columns": ["budget_month", "country_code", "product_category"], "rule_expression": "budget_month IS NOT NULL AND country_code IS NOT NULL AND country_code <> '' AND product_category IS NOT NULL AND product_category <> ''", "severity": "ERROR", "reject_reason_code": "SPB001", "reject_reason_text": "Budgetmaand, land of productcategorie ontbreekt.", "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-SPB-002", "source_object_id": "SHAREPOINT.SALES_BUDGETS", "rule_name": "budget_values_non_negative", "rule_type": "RANGE", "target_columns": ["budget_revenue", "budget_units", "forecast_revenue", "forecast_units"], "rule_expression": "budget_revenue IS NOT NULL AND budget_revenue >= 0 AND budget_units IS NOT NULL AND budget_units >= 0 AND forecast_revenue IS NOT NULL AND forecast_revenue >= 0 AND forecast_units IS NOT NULL AND forecast_units >= 0", "severity": "ERROR", "reject_reason_code": "SPB002", "reject_reason_text": "Budget- of forecastwaarde is negatief of ontbreekt.", "execution_order": 20, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-NAG-001", "source_object_id": "NAGER.HOLIDAYS_NL", "rule_name": "holiday_business_key_not_null", "rule_type": "NOT_NULL", "target_columns": ["holiday_date", "holiday_name", "country_code"], "rule_expression": "holiday_date IS NOT NULL AND holiday_name IS NOT NULL AND holiday_name <> '' AND country_code = 'NL'", "severity": "ERROR", "reject_reason_code": "NAG001", "reject_reason_text": "Nederlandse feestdag mist een sleutel of heeft een onjuist land.", "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-NAG-002", "source_object_id": "NAGER.HOLIDAYS_NL", "rule_name": "holiday_type_available", "rule_type": "NOT_NULL", "target_columns": ["holiday_types"], "rule_expression": "holiday_types IS NOT NULL AND size(holiday_types) > 0", "severity": "WARNING", "reject_reason_code": "NAG002", "reject_reason_text": "Feestdag heeft geen typeclassificatie.", "execution_order": 20, "threshold_pct": 10.0, "is_blocking": false, "rule_group": "OBSERVABILITY", "is_active": true },
+  { "rule_id": "DQ-FAB-001", "source_object_id": "FABRIC_SALES.ORDER_LINES", "rule_name": "order_line_key_unique_in_delivery", "rule_type": "UNIQUE", "target_columns": ["sales_order_detail_id"], "rule_expression": "sales_order_detail_id IS NOT NULL AND count(*) OVER (PARTITION BY sales_order_detail_id) = 1", "severity": "ERROR", "reject_reason_code": "FAB001", "reject_reason_text": "Orderregel mist een sleutel of komt dubbel voor in de snapshot.", "execution_order": 10, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-FAB-002", "source_object_id": "FABRIC_SALES.ORDER_LINES", "rule_name": "order_line_amounts_valid", "rule_type": "RANGE", "target_columns": ["order_quantity", "unit_price", "unit_price_discount", "total_due_amount"], "rule_expression": "order_quantity > 0 AND unit_price >= 0 AND unit_price_discount BETWEEN 0 AND 1 AND total_due_amount >= 0", "severity": "ERROR", "reject_reason_code": "FAB002", "reject_reason_text": "Aantal, prijs, korting of totaalbedrag valt buiten het toegestane bereik.", "execution_order": 20, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true },
+  { "rule_id": "DQ-FAB-003", "source_object_id": "FABRIC_SALES.ORDER_LINES", "rule_name": "source_watermark_available", "rule_type": "NOT_NULL", "target_columns": ["source_last_modified_at"], "rule_expression": "source_last_modified_at IS NOT NULL", "severity": "ERROR", "reject_reason_code": "FAB003", "reject_reason_text": "Fabric orderregel mist de bronwatermark.", "execution_order": 30, "threshold_pct": 0.0, "is_blocking": true, "rule_group": "CORE_VALIDATION", "is_active": true }
 ]

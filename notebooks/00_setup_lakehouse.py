@@ -33,7 +33,11 @@ from pathlib import Path
 sys.path.insert(0, f"{repo_root}/src")
 
 from contoso_lakehouse.context import Settings
+from contoso_lakehouse.context import RunContext
+from contoso_lakehouse.metadata import MetadataRepository
+from contoso_lakehouse.orchestration import Orchestrator
 from contoso_lakehouse.seed import load_seed
+from contoso_lakehouse.validation import MetadataValidator
 
 settings = Settings(env=env)
 
@@ -112,13 +116,30 @@ def run_script(relative_path: str) -> None:
     text = Path(f"{repo_root}/{relative_path}").read_text(encoding="utf-8")
     for placeholder, value in PARAMS.items():
         text = text.replace(placeholder, value)
-    for statement in split_sql_statements(text):
-        spark.sql(statement)
+    for statement_number, statement in enumerate(split_sql_statements(text), start=1):
+        try:
+            spark.sql(statement)
+        except Exception as exc:
+            preview = " ".join(statement.split())[:500]
+            raise RuntimeError(
+                f"DDL faalde in {relative_path}, statement {statement_number}: {preview}"
+            ) from exc
+
+
+def apply_pre_audit_migrations() -> None:
+    """Voegt metadata-kolommen toe die de daaropvolgende auditviews gebruiken."""
+    table = f"{settings.meta_catalog}.metadata.meta_gold_entity"
+    existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {table}").collect()}
+    if "source_system_id" not in existing:
+        spark.sql(f"ALTER TABLE {table} ADD COLUMNS (source_system_id STRING)")
+        print(f"Gemigreerd: {table}: source_system_id STRING")
 
 
 for script in SCRIPTS:
     print(f"-> {script}")
     run_script(script)
+    if script == "sql/01_metadata/10_metadata_model.sql":
+        apply_pre_audit_migrations()
 
 # COMMAND ----------
 
@@ -127,10 +148,18 @@ for script in SCRIPTS:
 # COMMAND ----------
 
 MIGRATIONS = {
+    "metadata.meta_source_connector": {
+        "request_options": "MAP<STRING,STRING>",
+    },
     "metadata.meta_source_object": {
         "schema_drift_policy": "STRING",
         "owner_team": "STRING",
         "criticality": "STRING",
+        "processing_route": "STRING",
+        "reference_catalog": "STRING",
+        "reference_schema": "STRING",
+        "reference_table": "STRING",
+        "quality_filter_expression": "STRING",
     },
     "metadata.meta_dependency": {
         "priority": "INT",
@@ -142,6 +171,7 @@ MIGRATIONS = {
         "rule_group": "STRING",
     },
     "metadata.meta_gold_entity": {
+        "source_system_id": "STRING",
         "publish_status": "STRING",
         "pointer_table": "STRING",
         "staging_table": "STRING",
@@ -211,4 +241,12 @@ display(spark.createDataFrame(list(counts.items()), "table string, records int")
 
 # COMMAND ----------
 
-dbutils.notebook.run("99_validate_metadata", 600, {"env": env, "repo_root": repo_root})
+ctx = RunContext.create(settings)
+repo = MetadataRepository(spark, settings)
+Orchestrator(spark, repo, ctx).validate_graph()
+issues = MetadataValidator(spark, repo, settings).validate_all()
+if issues:
+    for issue in issues:
+        print(f"[{issue.category}] {issue.entity}: {issue.message}")
+    raise ValueError(f"{len(issues)} metadata-problemen gevonden.")
+print("Metadata-validatie OK")

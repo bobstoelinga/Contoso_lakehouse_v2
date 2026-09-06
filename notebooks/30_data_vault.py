@@ -10,6 +10,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("env", "dev")
+dbutils.widgets.text("source_system_id", "SALES")
 dbutils.widgets.text("delivery_id", "")
 dbutils.widgets.text("batch_id", "")
 dbutils.widgets.dropdown("zone", "RAW_VAULT", ["RAW_VAULT", "BUSINESS_VAULT"])
@@ -27,6 +28,7 @@ from contoso_lakehouse.metadata import MetadataRepository
 from contoso_lakehouse.orchestration import Orchestrator
 
 env = dbutils.widgets.get("env")
+source_system_id = dbutils.widgets.get("source_system_id")
 zone = dbutils.widgets.get("zone")
 
 settings = Settings(env=env)
@@ -48,7 +50,10 @@ loader = VaultLoader(spark, repo, ctx)
 
 layer = "BUSINESS_VAULT" if zone == "BUSINESS_VAULT" else "RAW_VAULT"
 order = orch.execution_order(layer)
-in_zone = {e.dv_entity_id for e in repo.dv_entities() if e.dv_zone == zone and e.dv_entity_type != "PIT"}
+in_zone = {
+    entity.dv_entity_id
+    for entity in repo.vault_entities_for_source_system(source_system_id, zone)
+}
 plan = [e for e in order if e in in_zone] + sorted(in_zone - set(order))
 print(plan)
 

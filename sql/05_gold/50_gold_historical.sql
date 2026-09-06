@@ -149,3 +149,67 @@ USING DELTA
 CLUSTER BY (return_date, employee_hk, product_hk)
 COMMENT 'Gold Historisch: retourfeiten met medewerker- en datumrelaties.'
 TBLPROPERTIES (delta.enableChangeDataFeed = true, delta.autoOptimize.optimizeWrite = true);
+
+CREATE TABLE IF NOT EXISTS dim_price_agreement_hist (
+  price_agreement_hk STRING NOT NULL, agreement_id STRING NOT NULL, customer_segment STRING,
+  product_key STRING, currency_code STRING, list_price DECIMAL(18,4), discount_pct DECIMAL(9,4),
+  valid_from DATE, valid_to DATE, agreement_status STRING, updated_at TIMESTAMP, is_deleted BOOLEAN,
+  version_valid_from TIMESTAMP NOT NULL, version_valid_to TIMESTAMP NOT NULL, is_current BOOLEAN NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL, _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_dim_price_agreement_hist PRIMARY KEY (price_agreement_hk, version_valid_from) RELY
+)
+USING DELTA CLUSTER BY (price_agreement_hk)
+COMMENT 'Gold Historisch: prijsafspraken met technische en zakelijke geldigheid.';
+
+CREATE TABLE IF NOT EXISTS fct_sales_budget_hist (
+  sales_budget_hk STRING NOT NULL, budget_month DATE NOT NULL, country_code STRING NOT NULL,
+  product_category STRING NOT NULL, budget_id STRING, currency_code STRING, budget_revenue DECIMAL(18,4),
+  budget_units INT, forecast_revenue DECIMAL(18,4), forecast_units INT, approved_at TIMESTAMP,
+  updated_at TIMESTAMP, is_deleted BOOLEAN, valid_from TIMESTAMP NOT NULL, valid_to TIMESTAMP NOT NULL,
+  is_current BOOLEAN NOT NULL, record_source STRING NOT NULL, _batch_id STRING NOT NULL, _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_fct_sales_budget_hist PRIMARY KEY (sales_budget_hk, valid_from) RELY
+)
+USING DELTA CLUSTER BY (budget_month, country_code, product_category)
+COMMENT 'Gold Historisch: maandbudgetten en forecasts.';
+
+CREATE TABLE IF NOT EXISTS fct_cbs_jeugdzorg_hist (
+  cbs_jeugdzorg_hk STRING NOT NULL, vorm_code STRING NOT NULL, wijk_code STRING NOT NULL,
+  periode_code STRING NOT NULL, jongeren_totaal BIGINT, trajecten_totaal BIGINT, gemeente_naam STRING,
+  regio_type STRING, valid_from TIMESTAMP NOT NULL, valid_to TIMESTAMP NOT NULL, is_current BOOLEAN NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL, _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_fct_cbs_jeugdzorg_hist PRIMARY KEY (cbs_jeugdzorg_hk, valid_from) RELY
+)
+USING DELTA CLUSTER BY (periode_code, wijk_code)
+COMMENT 'Gold Historisch: CBS-jeugdzorgcijfers per vorm, wijk en periode.';
+
+CREATE TABLE IF NOT EXISTS dim_ecb_exchange_rate_hist (
+  currency_code STRING NOT NULL, rate_date DATE NOT NULL, rate_to_eur DECIMAL(18,8) NOT NULL,
+  source_series STRING NOT NULL, version_valid_from TIMESTAMP NOT NULL, version_valid_to TIMESTAMP NOT NULL,
+  is_current BOOLEAN NOT NULL, record_source STRING NOT NULL, _batch_id STRING NOT NULL, _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_dim_ecb_exchange_rate_hist PRIMARY KEY (currency_code, rate_date, version_valid_from) RELY
+)
+USING DELTA CLUSTER BY (currency_code, rate_date)
+COMMENT 'Gold Historisch: ECB-wisselkoersen met volledige referentiehistorie.';
+
+CREATE TABLE IF NOT EXISTS dim_nager_holiday_hist (
+  holiday_date DATE NOT NULL, holiday_name STRING NOT NULL, local_name STRING, country_code STRING NOT NULL,
+  global_holiday BOOLEAN NOT NULL, holiday_types ARRAY<STRING>, version_valid_from TIMESTAMP NOT NULL,
+  version_valid_to TIMESTAMP NOT NULL, is_current BOOLEAN NOT NULL, record_source STRING NOT NULL,
+  _batch_id STRING NOT NULL, _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_dim_nager_holiday_hist PRIMARY KEY (holiday_date, country_code, holiday_name, version_valid_from) RELY
+)
+USING DELTA CLUSTER BY (holiday_date, country_code)
+COMMENT 'Gold Historisch: Nederlandse feestdagen met volledige referentiehistorie.';
+
+CREATE TABLE IF NOT EXISTS fct_fabric_sales_order_line_hist (
+  sales_order_detail_id BIGINT NOT NULL, order_quantity INT NOT NULL,
+  unit_price DECIMAL(18,4) NOT NULL, unit_price_discount DECIMAL(9,6) NOT NULL,
+  total_due_amount DECIMAL(18,4) NOT NULL, order_status_code STRING NOT NULL,
+  source_last_modified_at TIMESTAMP NOT NULL, is_deleted BOOLEAN NOT NULL,
+  version_valid_from TIMESTAMP NOT NULL, version_valid_to TIMESTAMP NOT NULL,
+  is_current BOOLEAN NOT NULL, record_source STRING NOT NULL, _batch_id STRING NOT NULL,
+  _loaded_at TIMESTAMP NOT NULL,
+  CONSTRAINT pk_fct_fabric_sales_order_line_hist PRIMARY KEY (sales_order_detail_id, version_valid_from) RELY
+)
+USING DELTA CLUSTER BY (sales_order_detail_id, source_last_modified_at)
+COMMENT 'Gold Historisch: Fabric SQL orderregelcontract met referentiehistorie.';

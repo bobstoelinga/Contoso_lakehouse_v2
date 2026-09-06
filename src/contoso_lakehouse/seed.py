@@ -17,6 +17,7 @@ from contoso_lakehouse.context import Settings
 
 _SEED_FILES = {
     "meta_source_system": "meta_source_system.json",
+    "meta_source_connector": "meta_source_connector.json",
     "meta_source_object": "meta_source_object.json",
     "meta_dependency": "meta_dependency.json",
     "meta_quality_rule": "meta_quality_rule.json",
@@ -28,6 +29,7 @@ _SEED_FILES = {
 
 _KEY_COLUMNS = {
     "meta_source_system": "source_system_id",
+    "meta_source_connector": "source_object_id",
     "meta_source_object": "source_object_id",
     "meta_dependency": "dependency_id",
     "meta_quality_rule": "rule_id",
@@ -111,5 +113,7 @@ def _default_for(field):
         "valid_from": F.current_timestamp(),
         "evaluation_scope": F.lit("ROW"),
         "on_threshold_breach": F.lit("FAIL_BATCH"),
+        "processing_route": F.lit("RAW_VAULT"),
+        "source_system_id": F.lit("SALES"),
     }
     return defaults.get(field.name, F.lit(None).cast(field.dataType))

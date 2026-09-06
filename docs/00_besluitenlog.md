@@ -359,6 +359,178 @@ blijft optie 1 de standaard; superseden vereist daar formele goedkeuring.
 → [notebooks/07_supersede_delivery.py](../notebooks/07_supersede_delivery.py),
 [workflows/delivery_remediation.job.yml](../workflows/delivery_remediation.job.yml)
 
+### B-31 — Verwerkingsroute wordt per bronobject expliciet bepaald
+**Besluit (3 september 2026):** `meta_source_object` krijgt de verplichte
+standaardroute `RAW_VAULT` en ondersteunt daarnaast `REFERENCE_DATA`.
+`REFERENCE_DATA` doorloopt Landing, Bronze en Quality, maar wordt daarna als
+versioned referentietabel in Business Vault geladen. Alleen objecten met route
+`RAW_VAULT` mogen door de Data Vault-planner als hub, link of satellite worden
+verwerkt. Bestaande objecten behouden via de seed-default hun oorspronkelijke
+Raw-Vault-gedrag.
+→ [sql/01_metadata/10_metadata_model.sql](../sql/01_metadata/10_metadata_model.sql),
+[src/contoso_lakehouse/reference.py](../src/contoso_lakehouse/reference.py),
+[notebooks/31_reference_data.py](../notebooks/31_reference_data.py)
+
+### B-32 — CBS 86204NED is een Raw-Vault feitenbron, nog niet actief
+**Bevinding (3 september 2026):** CBS StatLine-tabel `86204NED` bevat
+jeugdzorgcijfers per zorgvorm, wijk/gemeente en periode. CBS classificeert delen
+van de cijfers als voorlopig en publiceert revisies. Daarom is dit geen
+referentie- of codelijst maar een historisch feitenobject met route `RAW_VAULT`.
+
+**Vervolgactie:** voeg vóór activering van CBS het landingvolume, de
+OData-extractjob, het bron- en Quality-contract en de Raw-Vault- en
+Gold-entiteiten voor dit data product toe. De vereiste Gold-routing per
+bronsysteem is gerealiseerd in B-33.
+
+### B-33 — Gold-verwerking is gebonden aan het bronsysteem van de delivery
+**Besluit (3 september 2026):** `meta_gold_entity` krijgt
+`source_system_id`, met `SALES` als achterwaarts compatibele standaardwaarde.
+De historische en actuele Gold-notebooks ontvangen hetzelfde bronsysteem als de
+delivery en verwerken uitsluitend de bijbehorende Gold-entiteiten. De
+metadata-validator weigert een publication group die meerdere bronsystemen
+bevat. Daarmee kan een toekomstige CBS-delivery geen Sales-publicatie bouwen of
+activeren.
+→ [src/contoso_lakehouse/gold.py](../src/contoso_lakehouse/gold.py),
+[src/contoso_lakehouse/metadata.py](../src/contoso_lakehouse/metadata.py),
+[src/contoso_lakehouse/validation.py](../src/contoso_lakehouse/validation.py),
+[notebooks/40_gold_historical.py](../notebooks/40_gold_historical.py),
+[notebooks/41_gold_current.py](../notebooks/41_gold_current.py)
+
+### B-34 — Brongebonden loads zijn geen multi-source integratie
+**Besluit (3 september 2026):** een `delivery_id` en de bijbehorende
+Gold-publicatie zijn primair brongebonden. Een Gold-data product dat Sales, CBS
+of andere bronnen combineert krijgt een eigen integratierun, publicatiegroep en
+expliciet freshness-/versiecontract. `SAME_DELIVERY` wordt niet tussen bronnen
+gebruikt. De broncode in de Raw-Vault-collision code voorkomt onbedoelde
+sleutelsamenval; business-key matching tussen bronnen is daarom een expliciete
+Business-Vault-verantwoordelijkheid.
+
+**Open acties:** ontwerp multi-source Business-Vault-integratie, snapshot-
+compleetheidsafhandeling voor reference data en contractmetadata voor jaarlijks
+vervangende CBS StatLine-tabellen.
+
+### B-35 — CBS eerst als zelfstandig data product valideren
+**Aanbeveling (3 september 2026):** onboard CBS StatLine `86204NED` eerst als
+een zelfstandig, brongebonden feitenproduct met eigen `CBS_JEUGDZORG_MART`-
+publicatiegroep. De inhoudelijke relatie met de Contoso Sales-case is nog niet
+vastgesteld; daarom wordt geen Sales-CBS-integratie ontworpen op basis van alleen
+een technische gemeentecode. Een gecombineerde mart vereist later een expliciete
+businessvraag, een matchingregel en een freshness-/versiecontract.
+
+### B-36 — ECB-wisselkoersen zijn de eerste natuurlijke externe Sales-verrijking
+**Aanbeveling (3 september 2026):** gebruik de officiële ECB Data API voor
+dagelijkse wisselkoersen als eerste externe referentiebron voor Sales. De
+brongegevens bevatten al `currency_code` en transactiedatums, waardoor de
+koppeling inhoudelijk en tijdsafhankelijk is. De bron volgt de
+`REFERENCE_DATA`-route naar Business Vault; een computed satellite verrijkt
+orders en retouren met de laatst bekende koers op of vóór de transactiedatum.
+
+**Randvoorwaarde:** de conversierichting en de boekhoudkundige keuze tussen
+koers-vastzetten en gecontroleerde herwaardering worden als metadata en
+businessregel vastgelegd vóór Gold-publicatie.
+
+### B-37 — Publieke API-connectors krijgen begrensde, auditeerbare retries
+**Besluit (4 september 2026):** CBS StatLine, ECB en Nager.Date gebruiken één
+generieke HTTP-extractroute. `meta_source_connector.request_options` beheert
+per object `timeout_seconds`, `total_timeout_seconds`, `max_retries` en
+`retry_delay_seconds`. De totale deadline omvat alle pagina's en retries van
+één connectorobject. Alleen tijdelijke fouten (timeout, verbinding, HTTP
+408/429/5xx) krijgen exponential backoff; overige fouten falen direct. De
+HTTP-response wordt per poging altijd gesloten.
+
+Extracties schrijven eerst naar een objectgebonden stagingfolder. Elke fout,
+ook een workflow-timeout, sluit de taak af als `FAILED` in de `LANDING`-
+auditlaag en verwijdert staging. Er verschijnt dus geen gedeeltelijke delivery
+in landing en Auto Loader kan die niet verwerken. Een volledige extractie
+schrijft eerst het manifest en publiceert daarna naar de datumfolder. De task
+heeft een harde limiet van vijftien minuten als platformvangnet, één job-retry
+na vijf minuten en een failure-alert.
+→ [src/contoso_lakehouse/connector.py](../src/contoso_lakehouse/connector.py),
+[notebooks/09_extract_public_api.py](../notebooks/09_extract_public_api.py),
+[workflows/public_api_extract.job.yml](../workflows/public_api_extract.job.yml)
+
+### B-39 — Bundle is gedeployed, lakehouse-provisioning is geblokkeerd
+**Bevinding (3 september 2026):** na OAuth-herauthenticatie valideerde en
+deployde de Asset Bundle succesvol naar `dev`. De uitvoering van
+`setup_lakehouse` eindigde echter met `INTERNAL_ERROR` in taak `create_objects`
+tijdens Delta-table DDL. De ontvangen stacktrace bevatte niet de oorspronkelijke
+SQL-foutmelding. Er is geen conclusie getrokken over de provisioningstatus van
+nieuwe CBS-, ECB- of Nager-objecten; de eerste falende DDL moet worden
+geïdentificeerd voordat de setup wordt herhaald.
+
+### B-40 — Elke publieke bron krijgt een zelfstandig Gold-data-product
+**Besluit (4 september 2026):** de drie publieke objecten worden volledig naar
+Gold uitgerold, zonder een impliciete koppeling met Sales. CBS-jeugdzorg blijft
+een Raw-Vault-feitenproduct met `CBS_JEUGDZORG_MART`. ECB-wisselkoersen en
+Nager-vakantiedagen behouden hun `REFERENCE_DATA`-route naar Business Vault en
+krijgen daarboven elk een SCD2-historische Gold-dimensie en een atomisch
+gepubliceerde actuele dimensie: respectievelijk `ECB_REFERENCE_MART` en
+`NAGER_REFERENCE_MART`.
+
+Een Gold-run blijft altijd brongebonden. Daardoor kan een ECB- of Nager-delivery
+geen Sales- of CBS-publicatie activeren; een toekomstige gecombineerde mart
+vereist nog steeds een expliciet integratie- en freshnesscontract.
+→ [metadata/seed/meta_gold_entity.json](../metadata/seed/meta_gold_entity.json),
+[sql/05_gold/50_gold_historical.sql](../sql/05_gold/50_gold_historical.sql),
+[sql/05_gold/51_gold_current.sql](../sql/05_gold/51_gold_current.sql)
+
+### B-40 — Externe en SharePoint-broncontracten zijn voorbereid
+**Uitvoering (4 september 2026):** de inactieve bronobjecten voor CBS StatLine,
+ECB en SharePoint zijn voorbereid voor landing, Bronze, Quality en Reject.
+CBS `86204NED` gebruikt nu de geverifieerde OData-velden `Vormen`, `Wijken`,
+`Perioden` en de relevante maatregelvelden. ECB leest de dagelijkse EXR-CSV
+tegen EUR en normaliseert `CURRENCY`, `TIME_PERIOD` en `OBS_VALUE` naar een
+versioned referentiecontract. Voor de toekomstige SharePoint-proef zijn
+synthetische `price_agreements.csv` en `sales_budgets.csv` toegevoegd.
+
+**Status:** de configuraties blijven inactief. Activering volgt pas na een
+geslaagde lakehouse-provisioning en een end-to-end extract naar Landing. CBS
+vereist daarnaast nog Raw-Vault- en Gold-definities voor het zelfstandige
+jeugdzorgdata-product; ECB kan na extract via de bestaande `REFERENCE_DATA`-
+route naar Business Vault worden geladen. De lokale gerichte regressies voor
+metadata, CBS, connector en referentiedata zijn geslaagd met 83 tests.
+
+### B-41 — Testbare data-producten voor SharePoint, CBS en ECB
+**Uitvoering (4 september 2026):** de resterende fysieke en metadata-gedreven
+tabellen zijn gedefinieerd. `SHAREPOINT.PRICE_AGREEMENTS` en
+`SHAREPOINT.SALES_BUDGETS` doorlopen Bronze, Quality, Reject, een eigen
+Raw-Vault hub/satellite en een gezamenlijke actuele Gold-publicatiegroep
+`SHAREPOINT_SALES_INPUT`. CBS doorloopt dezelfde keten als zelfstandig
+`CBS_JEUGDZORG_MART`. ECB blijft een versioned `REFERENCE_DATA`-product in
+Business Vault, omdat de koersgegevens bedoeld zijn voor toekomstige
+Sales-verrijking en geen zelfstandig Gold-contract vereisen.
+
+**Status:** CBS, ECB en de twee SharePoint-objecten zijn actief in metadata en
+kunnen via een handmatige, brongebonden jobrun worden getest. De daadwerkelijke
+Databricks-provisioning blijft afhankelijk van herstel van de bestaande
+`setup_lakehouse` DDL-fout; de volledige lokale regressiesuite is na deze
+uitbreiding geslaagd met 83 tests.
+
+### B-42 — Setup rapporteert voortaan het falende DDL-statement
+**Uitvoering (4 september 2026):** `setup_lakehouse` rapporteert bij elke
+DDL-fout nu het SQL-bestand, statementnummer en een ingekorte SQL-preview,
+terwijl de oorspronkelijke exception als oorzaak behouden blijft. Daardoor is
+een volgende setup-run gericht te herstellen in plaats van alleen een algemene
+`INTERNAL_ERROR` te tonen.
+
+**Blokkade:** de lokale Databricks CLI-validatie faalde vóór validatie van de
+bundle met `403 Invalid access token` voor het dev-profiel. Herstel eerst de
+interactieve Databricks OAuth-login; daarna zijn `databricks bundle validate -t
+dev` en `databricks bundle run setup_lakehouse -t dev` de volgende checks.
+
+### B-43 — Nager.Date-feestdagen zijn een testbare referentiebron
+**Uitvoering (4 september 2026):** `NAGER.HOLIDAYS_NL` is toegevoegd als
+jaarlijkse openbare JSON-bron. De bron doorloopt Landing, Bronze, Quality en
+Reject en onderhoudt daarna een versioned referentietabel in Business Vault.
+Het contract normaliseert datum, Nederlandse en lokale naam, landcode,
+landelijke-status en feestdagtypes. Dit maakt de bron later inzetbaar voor
+werkdag-, leverings- en seizoensanalyses.
+
+**Besluit:** een bron zonder actieve Gold-publicatiegroep, zoals ECB en Nager,
+is na een succesvolle `BUSINESS_VAULT`-reference-load afgerond. De
+delivery-gate selecteert die delivery daarna niet opnieuw. Bronnen met Gold
+blijven uitsluitend afronden op een actieve atomische publicatiegroep.
+
 ### B-31 — Beheerjobs gebruiken hetzelfde gedeployde frameworkpad
 **Bevinding:** de eerste uitvoering van de nieuwe `supersede_delivery`-job
 faalde met `ModuleNotFoundError` omdat de notebook het bundle-`src`-pad niet

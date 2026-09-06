@@ -164,10 +164,10 @@ class GoldLoader:
                 "Publicatiegroep bevat geen complete set BUILDING-publicaties; pointers blijven ongewijzigd."
             )
 
-    def run_current_layer(self) -> None:
-        """Bouwt en publiceert alle Gold Actueel entiteiten per publication group."""
+    def run_current_layer(self, source_system_id: str) -> None:
+        """Bouwt en publiceert Gold Actueel per brongebonden publicatiegroep."""
         groups: dict[str, list[GoldEntity]] = defaultdict(list)
-        for entity in self.repo.gold_entities():
+        for entity in self.repo.gold_entities_for_source_system(source_system_id):
             if entity.gold_layer == "CURRENT":
                 groups[entity.publication_group_id or entity.gold_entity_id].append(entity)
 
@@ -194,8 +194,8 @@ class GoldLoader:
             """
         )
 
-    def run_historical_layer(self) -> None:
-        for entity in self.repo.gold_entities():
+    def run_historical_layer(self, source_system_id: str) -> None:
+        for entity in self.repo.gold_entities_for_source_system(source_system_id):
             if entity.gold_layer == "HISTORICAL":
                 self.load_historical(entity)
 

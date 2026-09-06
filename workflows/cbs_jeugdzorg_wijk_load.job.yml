@@ -1,0 +1,23 @@
+# Zelfstandig end-to-end laadproces voor CBS-jeugdzorg per wijk.
+resources:
+  jobs:
+    load_cbs_jeugdzorg_wijk:
+      name: "[${var.env}] Contoso - Load CBS Jeugdzorg Wijk"
+      description: "Extract -> Bronze -> Quality -> Raw Vault -> Gold voor CBS."
+      max_concurrent_runs: 1
+      parameters:
+        - name: delivery_date
+          default: ""
+      tasks:
+        - task_key: extract_cbs
+          run_job_task:
+            job_id: ${resources.jobs.extract_public_api.id}
+            job_parameters:
+              source_object_id: CBS.JEUGDZORG_WIJK_2025
+              delivery_date: "{{job.parameters.delivery_date}}"
+        - task_key: load_cbs_to_gold
+          depends_on: [{ task_key: extract_cbs }]
+          run_job_task:
+            job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
+            job_parameters:
+              source_system_id: CBS

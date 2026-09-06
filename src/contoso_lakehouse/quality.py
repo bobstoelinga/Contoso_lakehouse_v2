@@ -44,6 +44,16 @@ class QualityEngine:
             parts.append(f"cast({expr} AS {m.target_data_type}) AS {target}")
         return ", ".join(parts)
 
+    def _business_key_columns(self, source_object_id: str) -> list[str]:
+        columns = [
+            safe_identifier(mapping.target_column)
+            for mapping in self.repo.mappings(source_object_id, "QUALITY")
+            if mapping.is_business_key
+        ]
+        if not columns:
+            raise ValueError(f"Geen QUALITY-business-keymapping gevonden voor {source_object_id}")
+        return columns
+
     # -- regels -----------------------------------------------------------
     @staticmethod
     def _rule_column(rule: QualityRule) -> str:
@@ -93,7 +103,8 @@ class QualityEngine:
                        _delivery_id, _delivery_date, _batch_id, _record_source,
                        to_json(struct(*)) AS _payload
                 FROM {obj.bronze_table_fqn}
-                WHERE _delivery_id = '{delivery_id}'
+                                WHERE _delivery_id = '{delivery_id}'
+                                    {f"AND ({obj.quality_filter_expression})" if obj.quality_filter_expression else ""}
                 """
             )
             evaluated = self._evaluate(source, rules)
@@ -117,7 +128,9 @@ class QualityEngine:
             for col in error_cols:
                 passed_expr = passed_expr & F.coalesce(F.col(col), F.lit(False))
 
-            business_key = F.concat_ws("|", *[F.col(c) for c in obj.business_key_columns])
+            business_key = F.concat_ws(
+                "|", *[F.col(column) for column in self._business_key_columns(source_object_id)]
+            )
             warning_codes = F.array_compact(
                 F.array(*[
                     F.when(~F.coalesce(F.col(self._rule_column(r)), F.lit(False)), F.lit(r.reject_reason_code))

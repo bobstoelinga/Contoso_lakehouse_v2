@@ -34,6 +34,7 @@ class SourceObject:
     schema_drift_policy: str = "STRICT"
     owner_team: str = "unknown"
     criticality: str = "MEDIUM"
+    processing_route: str = "RAW_VAULT"
     bronze_table_fqn: str = ""
     bronze_partition_columns: list[str] = field(default_factory=list)
     checkpoint_path: str = ""
@@ -42,6 +43,8 @@ class SourceObject:
     max_files_per_trigger: int = 1000
     quality_table_fqn: str = ""
     reject_table_fqn: str = ""
+    reference_table_fqn: str = ""
+    quality_filter_expression: str | None = None
     load_order: int = 0
 
 
@@ -103,6 +106,7 @@ class GoldEntity:
     publish_status: str = "READY"
     pointer_table: str | None = None
     staging_table: str | None = None
+    source_system_id: str = "SALES"
 
 
 def _as_list(value: Any) -> list[str]:
@@ -149,6 +153,7 @@ class MetadataRepository:
                 schema_drift_policy=getattr(r, "schema_drift_policy", "STRICT"),
                 owner_team=getattr(r, "owner_team", "unknown"),
                 criticality=getattr(r, "criticality", "MEDIUM"),
+                processing_route=getattr(r, "processing_route", "RAW_VAULT") or "RAW_VAULT",
                 bronze_table_fqn=self._fqn(r.bronze_catalog, r.bronze_schema, r.bronze_table),
                 bronze_partition_columns=_as_list(r.bronze_partition_columns),
                 checkpoint_path=self.settings.resolve(r.checkpoint_path),
@@ -157,6 +162,14 @@ class MetadataRepository:
                 max_files_per_trigger=r.max_files_per_trigger or 1000,
                 quality_table_fqn=self._fqn(r.quality_catalog, r.quality_schema, r.quality_table),
                 reject_table_fqn=self._fqn(r.reject_catalog, r.reject_schema, r.reject_table),
+                quality_filter_expression=getattr(r, "quality_filter_expression", None),
+                reference_table_fqn=(
+                    self._fqn(r.reference_catalog, r.reference_schema, r.reference_table)
+                    if all(getattr(r, name, None) for name in (
+                        "reference_catalog", "reference_schema", "reference_table"
+                    ))
+                    else ""
+                ),
                 load_order=r.load_order,
             )
             for r in rows
@@ -174,6 +187,33 @@ class MetadataRepository:
             o for o in self.source_objects()
             if o.source_system_id == source_system_id and o.is_mandatory_in_delivery
         )
+
+    def reference_objects(self, source_system_id: str) -> tuple[SourceObject, ...]:
+        """Geeft de bronobjecten die na Quality direct naar Business Vault gaan."""
+        return tuple(
+            o for o in self.source_objects()
+            if o.source_system_id == source_system_id and o.processing_route == "REFERENCE_DATA"
+        )
+
+    def vault_entities_for_source_system(
+        self, source_system_id: str, zone: str,
+    ) -> tuple[DvEntity, ...]:
+        """Beperkt Vault-loads tot RAW_VAULT-objecten van het gekozen bronsysteem."""
+        result = []
+        for entity in self.dv_entities():
+            if entity.dv_zone != zone or entity.dv_entity_type == "PIT":
+                continue
+            source_ids = {mapping.source_object_id for mapping in self.dv_mappings(entity.dv_entity_id)}
+            if not source_ids:
+                continue
+            sources = [self.source_object(source_id) for source_id in source_ids]
+            if all(
+                source.source_system_id == source_system_id
+                and source.processing_route == "RAW_VAULT"
+                for source in sources
+            ):
+                result.append(entity)
+        return tuple(result)
 
     # -- kwaliteitsregels -------------------------------------------------
     def quality_rules(self, source_object_id: str) -> list[QualityRule]:
@@ -259,6 +299,7 @@ class MetadataRepository:
         entities = [
             GoldEntity(
                 gold_entity_id=r.gold_entity_id,
+                source_system_id=getattr(r, "source_system_id", "SALES") or "SALES",
                 gold_layer=r.gold_layer,
                 entity_type=r.entity_type,
                 target_table_fqn=self._fqn(r.target_catalog, r.target_schema, r.target_table),
@@ -279,6 +320,13 @@ class MetadataRepository:
             for r in rows
         ]
         return tuple(sorted(entities, key=lambda e: e.load_order))
+
+    def gold_entities_for_source_system(self, source_system_id: str) -> tuple[GoldEntity, ...]:
+        """Geeft uitsluitend Gold-entiteiten voor het bronsysteem van de delivery."""
+        return tuple(
+            entity for entity in self.gold_entities()
+            if entity.source_system_id == source_system_id
+        )
 
     # -- afhankelijkheden -------------------------------------------------
     def dependencies(self) -> list[Any]:

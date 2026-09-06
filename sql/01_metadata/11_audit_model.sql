@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS audit_load_run (
   batch_id              STRING    NOT NULL COMMENT 'Groepeert alle stappen van één end-to-end run',
   delivery_id           STRING,
   metadata_version      STRING    NOT NULL COMMENT 'SHA-256 fingerprint van de metadatarelease',
-  layer                 STRING    NOT NULL COMMENT 'BRONZE | QUALITY | RAW_VAULT | BUSINESS_VAULT | GOLD_HIST | GOLD_CURR',
+  layer                 STRING    NOT NULL COMMENT 'LANDING | BRONZE | QUALITY | RAW_VAULT | BUSINESS_VAULT | GOLD_HIST | GOLD_CURR',
   entity_id             STRING    NOT NULL,
   run_status            STRING    NOT NULL COMMENT 'RUNNING | SUCCESS | FAILED | SKIPPED',
   rows_read             BIGINT    DEFAULT 0,
@@ -235,10 +235,28 @@ WITH open_deliveries AS (
         AND is_mandatory_in_delivery
         AND is_active
     )
-    AND NOT EXISTS (
-      SELECT 1 FROM audit_gold_publication_group pg
-      WHERE pg.delivery_id = r.delivery_id
-        AND pg.release_status = 'ACTIVE')
+    AND NOT (
+      EXISTS (
+        SELECT 1 FROM audit_gold_publication_group pg
+        WHERE pg.delivery_id = r.delivery_id
+          AND pg.release_status = 'ACTIVE'
+      )
+      OR (
+        NOT EXISTS (
+          SELECT 1
+          FROM contoso_meta_${env}.metadata.meta_gold_entity ge
+          WHERE ge.source_system_id = r.source_system_id
+            AND ge.gold_layer = 'CURRENT'
+            AND ge.is_active
+        )
+        AND EXISTS (
+          SELECT 1 FROM v_load_run_status lr
+          WHERE lr.delivery_id = r.delivery_id
+            AND lr.layer = 'BUSINESS_VAULT'
+            AND lr.run_status = 'SUCCESS'
+        )
+      )
+    )
 )
 SELECT *
 FROM open_deliveries

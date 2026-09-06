@@ -6,5 +6,45 @@
     "delivery_folder_format": "yyyy-MM-dd",
     "delivery_frequency": "DAILY",
     "is_active": true
+  },
+  {
+    "source_system_id": "CBS",
+    "source_system_name": "CBS StatLine Open Data",
+    "landing_volume_path": "/Volumes/raw_${env}/cbs/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "ON_DEMAND",
+    "is_active": true
+  },
+  {
+    "source_system_id": "ECB",
+    "source_system_name": "European Central Bank Data API",
+    "landing_volume_path": "/Volumes/raw_${env}/ecb/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "DAILY",
+    "is_active": true
+  },
+  {
+    "source_system_id": "SHAREPOINT",
+    "source_system_name": "SharePoint Sales Input",
+    "landing_volume_path": "/Volumes/raw_${env}/sharepoint/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "ON_DEMAND",
+    "is_active": false
+  },
+  {
+    "source_system_id": "NAGER",
+    "source_system_name": "Nager.Date Public Holidays API",
+    "landing_volume_path": "/Volumes/raw_${env}/nager/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "YEARLY",
+    "is_active": true
+  },
+  {
+    "source_system_id": "FABRIC_SALES",
+    "source_system_name": "Contoso Fabric SQL Database sales order lines",
+    "landing_volume_path": "/Volumes/raw_${env}/fabric_sales/landing",
+    "delivery_folder_format": "yyyy-MM-dd",
+    "delivery_frequency": "ON_DEMAND",
+    "is_active": true
   }
 ]

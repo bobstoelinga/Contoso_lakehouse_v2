@@ -63,7 +63,7 @@ flowchart TD
 | Laag | Doel | Wat er níét gebeurt |
 |---|---|---|
 | **Volume** | Onbewerkte bestanden bewaren; één datumfolder = één levering | Geen transformatie, geen validatie |
-| **Bronze** | 1:1 opslag + technische kolommen; incrementeel via Auto Loader met schema evolution | Geen typering, geen filtering, geen deduplicatie |
+| **Bronze** | 1:1 opslag van alle bronkolommen + technische kolommen; incrementeel via Auto Loader met schema evolution | Geen typering of inhoudelijke filtering |
 | **Quality** | Typeren en valideren volgens `meta_mapping` en `meta_quality_rule` | Geen businesslogica, geen joins tussen entiteiten |
 | **Reject** | Afgekeurde records met alle faalredenen en de originele payload | Geen automatische correctie |
 | **Raw Vault** | Historisatie zonder interpretatie (DV2.0) | Geen berekeningen, geen businessregels |

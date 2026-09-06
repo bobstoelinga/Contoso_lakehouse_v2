@@ -8,6 +8,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("env", "dev")
+dbutils.widgets.text("source_system_id", "SALES")
 dbutils.widgets.text("delivery_id", "")
 dbutils.widgets.text("batch_id", "")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
@@ -24,6 +25,7 @@ from contoso_lakehouse.metadata import MetadataRepository
 from contoso_lakehouse.orchestration import Orchestrator
 
 settings = Settings(env=dbutils.widgets.get("env"))
+source_system_id = dbutils.widgets.get("source_system_id")
 ctx = RunContext.create(
     settings,
     batch_id=dbutils.widgets.get("batch_id"),
@@ -35,7 +37,7 @@ loader = GoldLoader(spark, repo, ctx)
 
 # COMMAND ----------
 
-for entity in repo.gold_entities():
+for entity in repo.gold_entities_for_source_system(source_system_id):
     if entity.gold_layer != "HISTORICAL":
         continue
     orch.require_upstream_success(entity.gold_entity_id, "GOLD_HIST")

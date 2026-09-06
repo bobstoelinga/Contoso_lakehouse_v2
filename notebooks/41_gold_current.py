@@ -10,6 +10,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("env", "dev")
+dbutils.widgets.text("source_system_id", "SALES")
 dbutils.widgets.text("delivery_id", "")
 dbutils.widgets.text("batch_id", "")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
@@ -47,7 +48,7 @@ display(spark.sql(f"SELECT * FROM {settings.meta_catalog}.audit.v_active_gold_pu
 
 # COMMAND ----------
 
-loader.run_current_layer()
+loader.run_current_layer(dbutils.widgets.get("source_system_id"))
 
 # COMMAND ----------
 

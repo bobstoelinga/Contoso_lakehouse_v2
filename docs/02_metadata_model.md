@@ -26,13 +26,13 @@ erDiagram
 | Tabel | Rol | Sleutel |
 |---|---|---|
 | `meta_source_system` | Bronsysteem + landingconventie | `source_system_id` |
-| `meta_source_object` | Bronobject, laadstrategie, Auto Loader config, doellocaties | `source_object_id` |
+| `meta_source_object` | Bronobject, route, laadstrategie, Auto Loader config, doellocaties | `source_object_id` |
 | `meta_dependency` | Afhankelijkheidsgraaf over alle lagen | `dependency_id` |
 | `meta_quality_rule` | Declaratieve kwaliteitsregels | `rule_id` |
 | `meta_mapping` | Bron-doel mapping op kolomniveau | `mapping_id` |
 | `meta_dv_entity` | Hub / Link / Satellite / PIT definities | `dv_entity_id` |
 | `meta_dv_mapping` | Kolommapping Quality → Data Vault, incl. hashdiff-scope | `dv_mapping_id` |
-| `meta_gold_entity` | Gold Historisch en Gold Actueel entiteiten | `gold_entity_id` |
+| `meta_gold_entity` | Gold Historisch en Actueel, gebonden aan een bronsysteem/data product | `gold_entity_id` |
 
 ## Audittabellen (`contoso_meta_<env>.audit`)
 
@@ -59,6 +59,26 @@ erDiagram
 | `FULL_OVERWRITE` | Volledig vervangen | Geïmplementeerd |
 | `INCREMENTAL_CDC` | Change feed met I/U/D | Openstaand |
 | `PARTIAL_SNAPSHOT` | Deelsnapshot; ontbrekende sleutels zijn géén delete | Openstaand |
+
+### Verwerkingsroute (`meta_source_object.processing_route`)
+
+| Waarde | Route na Quality | Gebruik |
+|---|---|---|
+| `RAW_VAULT` | Raw Vault -> Business Vault -> Gold | Bedrijfsentiteiten, transacties en zelfstandige historische feiten |
+| `REFERENCE_DATA` | Versioned reference table in Business Vault -> Gold | Code-, classificatie- en verrijkingssets, zoals ECB-wisselkoersen en Nager-feestdagen |
+
+De route wordt **per bronobject** gekozen. Bestaande objecten krijgen bij het
+seeden standaard `RAW_VAULT`. Een `REFERENCE_DATA`-object vereist
+`reference_catalog`, `reference_schema` en `reference_table`; de loader bewaart
+daar een SCD2-achtige referentiehistorie op business key en change-trackingkolommen.
+
+### Gold-bronbinding (`meta_gold_entity.source_system_id`)
+
+Elke Gold-entiteit is gebonden aan één bronsysteem of data product. Historische
+en actuele Gold-loads verwerken uitsluitend entiteiten met dezelfde
+`source_system_id` als de actieve delivery. Een publication group mag geen
+entiteiten van meerdere bronsystemen bevatten; de metadata-validatie blokkeert
+die configuratiefout vóór uitvoering.
 
 ### Afhankelijkheidstype (`meta_dependency.dependency_type`)
 

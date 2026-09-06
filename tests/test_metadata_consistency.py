@@ -13,7 +13,7 @@ from contoso_lakehouse.audit import AuditLogger
 from contoso_lakehouse.bronze import BronzeLoader, SchemaDriftError
 from contoso_lakehouse.gold import GoldLoader
 from contoso_lakehouse.hashing import hash_key, hashdiff
-from contoso_lakehouse.metadata import GoldEntity
+from contoso_lakehouse.metadata import DvEntity, GoldEntity, MetadataRepository, SourceObject
 from contoso_lakehouse.orchestration import (
     DependencyCycleError,
     GateNotOpenError,
@@ -146,6 +146,56 @@ def test_parallel_execution_waves_prioritise_ready_work_and_reject_cycles():
 
     with pytest.raises(ValueError, match="minimaal 1"):
         parallel_execution_waves({"A": set()}, max_parallelism=0)
+
+
+def test_vault_planning_excludes_reference_data_and_other_source_systems():
+    sales_source = SourceObject(
+        "SALES.CUSTOMERS", "SALES", "customers", "*.parquet", "parquet", {},
+        "SNAPSHOT_SCD2", ["customer_key"], ["customer_name"], None, True,
+    )
+    reference_source = SourceObject(
+        "CBS.GEMEENTEN", "CBS", "gemeenten", "*.parquet", "parquet", {},
+        "SNAPSHOT_SCD2", ["gemeente_code"], ["gemeente_naam"], None, True,
+        processing_route="REFERENCE_DATA",
+    )
+    entity = DvEntity(
+        "HUB_CUSTOMER", "HUB", "RAW_VAULT", "vault.raw.hub_customer",
+        "vault.raw.hub_customer", "hk_customer", [], ["customer_key"], None, "'SALES'", 10,
+    )
+    repository = object.__new__(MetadataRepository)
+    repository.dv_entities = lambda: (entity,)
+    repository.dv_mappings = lambda _: [type("Mapping", (), {"source_object_id": "SALES.CUSTOMERS"})()]
+    repository.source_object = lambda source_id: {
+        sales_source.source_object_id: sales_source,
+        reference_source.source_object_id: reference_source,
+    }[source_id]
+
+    assert repository.vault_entities_for_source_system("SALES", "RAW_VAULT") == (entity,)
+
+    repository.dv_mappings = lambda _: [type("Mapping", (), {"source_object_id": "CBS.GEMEENTEN"})()]
+    assert repository.vault_entities_for_source_system("CBS", "RAW_VAULT") == ()
+
+
+def test_gold_metadata_is_scoped_to_the_delivery_source_system():
+    sales_gold = GoldEntity(
+        gold_entity_id="GC_SALES", gold_layer="CURRENT", entity_type="DIMENSION",
+        target_table_fqn="gold.current.sales", target_catalog="gold", target_schema="current",
+        target_table="sales", select_sql="SELECT 1", business_key_columns=["id"],
+        scd_type="SNAPSHOT", publish_mode="ATOMIC_SWAP", publication_group_id="SALES_MART",
+        depends_on_gold_entity_ids=[], load_order=1, source_system_id="SALES",
+    )
+    cbs_gold = GoldEntity(
+        gold_entity_id="GC_CBS", gold_layer="CURRENT", entity_type="FACT",
+        target_table_fqn="gold.current.cbs", target_catalog="gold", target_schema="current",
+        target_table="cbs", select_sql="SELECT 1", business_key_columns=["id"],
+        scd_type="SNAPSHOT", publish_mode="ATOMIC_SWAP", publication_group_id="CBS_MART",
+        depends_on_gold_entity_ids=[], load_order=1, source_system_id="CBS",
+    )
+    repository = object.__new__(MetadataRepository)
+    repository.gold_entities = lambda: (sales_gold, cbs_gold)
+
+    assert repository.gold_entities_for_source_system("SALES") == (sales_gold,)
+    assert repository.gold_entities_for_source_system("CBS") == (cbs_gold,)
 
 
 class _Rows:
@@ -481,6 +531,20 @@ def test_landing_location_is_environment_specific_and_passed_to_setup():
     assert "landing_path: ${var.landing_path}" in setup_workflow
 
 
+def test_fabric_sales_schemas_and_landing_volumes_are_provisioned():
+    ddl = CATALOGS_DDL.read_text(encoding="utf-8")
+
+    for location in (
+        "raw_${env}.fabric_sales.landing",
+        "raw_${env}.fabric_sales.checkpoints",
+        "raw_${env}.fabric_sales.quarantine",
+        "contoso_bronze_${env}.fabric_sales",
+        "contoso_quality_${env}.fabric_sales",
+        "contoso_reject_${env}.fabric_sales",
+    ):
+        assert location in ddl
+
+
 def test_gold_consumption_requires_explicit_table_and_view_grants():
     base_grants = (
         Path(__file__).resolve().parents[1] / "sql" / "00_unity_catalog" / "01_grants.sql"
@@ -619,6 +683,68 @@ def test_setup_migrates_gold_fact_columns_used_by_current_gold():
         assert f'"{column}":' in setup
 
 
+def test_setup_reports_the_failing_ddl_statement():
+    setup = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "00_setup_lakehouse.py"
+    ).read_text(encoding="utf-8")
+
+    assert "enumerate(split_sql_statements(text), start=1)" in setup
+    assert "DDL faalde in {relative_path}, statement {statement_number}" in setup
+    assert "raise RuntimeError(" in setup
+    assert ") from exc" in setup
+
+
+def test_setup_migrates_gold_source_before_creating_audit_views():
+    setup = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "00_setup_lakehouse.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def apply_pre_audit_migrations()" in setup
+    assert "ALTER TABLE {table} ADD COLUMNS (source_system_id STRING)" in setup
+    assert 'if script == "sql/01_metadata/10_metadata_model.sql":' in setup
+
+
+def test_public_api_extractor_preserves_an_explicit_empty_records_key():
+    extractor = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "09_extract_public_api.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'records_key = row.records_key if row.records_key is not None else "value"' in extractor
+    assert "records_key=records_key" in extractor
+    assert "sys.landing_volume_path" in extractor
+    assert "metadata.meta_source_system sys" in extractor
+
+
+def test_fabric_extractor_uses_the_service_principal_login_format():
+    extractor = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "11_extract_fabric_sql.py"
+    ).read_text(encoding="utf-8")
+    connector = _seed("meta_source_connector")
+
+    assert 'f"{dbutils.secrets.get(secret_scope, \'client-id\')}@"' in extractor
+    assert 'f"{dbutils.secrets.get(secret_scope, \'tenant-id\')}"' in extractor
+    fabric_connector = next(
+        row for row in connector if row["source_object_id"] == "FABRIC_SALES.ORDER_LINES"
+    )
+    assert "authentication=ActiveDirectoryServicePrincipal" in fabric_connector["endpoint_url"]
+
+
+def test_fabric_sales_gold_is_source_bound_and_atomically_published():
+    entities = {
+        entity["gold_entity_id"]: entity
+        for entity in _seed("meta_gold_entity")
+        if entity.get("source_system_id") == "FABRIC_SALES"
+    }
+
+    historical = entities["GH_FCT_FABRIC_SALES_ORDER_LINE"]
+    current = entities["GC_FCT_FABRIC_SALES_ORDER_LINE"]
+    assert historical["target_table"] == "fct_fabric_sales_order_line_hist"
+    assert "ref_fabric_sales_order_lines_h" in historical["select_sql"]
+    assert current["publication_group_id"] == "FABRIC_SALES_MART"
+    assert current["publish_mode"] == "ATOMIC_SWAP"
+    assert current["depends_on_gold_entity_ids"] == [historical["gold_entity_id"]]
+
+
 def test_delivery_gate_requires_an_active_complete_gold_publication_group():
     audit_ddl = (
         Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
@@ -631,6 +757,19 @@ def test_delivery_gate_requires_an_active_complete_gold_publication_group():
     assert "layer = 'GOLD_CURR' AND lr.run_status = 'SUCCESS'" not in processable_view
     assert "r.expected_object_count = (" in processable_view
     assert "meta_source_object" in processable_view
+
+
+def test_reference_only_delivery_is_completed_by_business_vault_success():
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+    processable_view = audit_ddl.split("CREATE OR REPLACE VIEW v_next_processable_delivery", 1)[1]
+    processable_view = processable_view.split("-- Laatste succesvolle business load", 1)[0]
+
+    assert "meta_gold_entity ge" in processable_view
+    assert "ge.gold_layer = 'CURRENT'" in processable_view
+    assert "lr.layer = 'BUSINESS_VAULT'" in processable_view
+    assert "lr.run_status = 'SUCCESS'" in processable_view
 
 
 def test_append_only_audit_event_table_has_no_column_defaults():
@@ -752,6 +891,33 @@ def test_atomic_swap_entities_have_publication_group():
             assert entity.get("publication_group_id"), entity["gold_entity_id"]
 
 
+def test_public_api_extract_selects_every_connector_field_it_uses():
+    notebook = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "09_extract_public_api.py"
+    ).read_text(encoding="utf-8")
+    select_clause = notebook.split("\nSELECT ", 1)[1].split("\nFROM", 1)[0]
+
+    for field in re.findall(r"\brow\.(\w+)", notebook):
+        assert field in select_clause, field
+
+
+def test_public_reference_sources_have_historical_and_current_gold_products():
+    entities = _seed("meta_gold_entity")
+    by_source = {}
+    for entity in entities:
+        by_source.setdefault(entity.get("source_system_id", "SALES"), set()).add(entity["gold_entity_id"])
+
+    assert {"GH_DIM_ECB_EXCHANGE_RATE", "GC_DIM_ECB_EXCHANGE_RATE"} <= by_source["ECB"]
+    assert {"GH_DIM_NAGER_HOLIDAY", "GC_DIM_NAGER_HOLIDAY"} <= by_source["NAGER"]
+
+    historical_ddl = (Path(__file__).resolve().parents[1] / "sql" / "05_gold" / "50_gold_historical.sql").read_text(encoding="utf-8")
+    current_ddl = (Path(__file__).resolve().parents[1] / "sql" / "05_gold" / "51_gold_current.sql").read_text(encoding="utf-8")
+    assert "dim_ecb_exchange_rate_hist" in historical_ddl
+    assert "dim_nager_holiday_hist" in historical_ddl
+    assert "CREATE OR REPLACE VIEW dim_ecb_exchange_rate" in current_ddl
+    assert "CREATE OR REPLACE VIEW dim_nager_holiday" in current_ddl
+
+
 def test_quality_rules_have_valid_severity():
     for rule in _seed("meta_quality_rule"):
         assert rule["severity"] in {"ERROR", "WARNING"}, rule["rule_id"]
@@ -769,6 +935,13 @@ def test_source_objects_define_enterprise_metadata():
         assert obj.get("schema_drift_policy"), obj["source_object_id"]
         assert obj.get("owner_team"), obj["source_object_id"]
         assert obj.get("criticality") in {"LOW", "MEDIUM", "HIGH"}, obj["source_object_id"]
+
+
+def test_cbs_snapshot_preserves_unmapped_columns_in_rescue_mode():
+    cbs = next(obj for obj in _seed("meta_source_object") if obj["source_object_id"] == "CBS.JEUGDZORG_WIJK_2025")
+    assert cbs["schema_drift_policy"] == "RESCUE"
+    bronze_loader = (Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "bronze.py").read_text(encoding="utf-8")
+    assert 'F.to_json(F.struct(*[F.col(column) for column in extra_columns]))' in bronze_loader
 
 
 def test_dependency_entries_define_priority_and_retry_policy():

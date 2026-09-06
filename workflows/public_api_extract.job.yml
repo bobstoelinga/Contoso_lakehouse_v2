@@ -1,0 +1,34 @@
+# Handmatige extractjob voor publieke bronnen, zoals CBS, ECB en Nager.Date.
+# De job schrijft uitsluitend een immutable levering naar Landing.
+resources:
+  jobs:
+    extract_public_api:
+      name: "[${var.env}] Contoso - Extract Public API"
+      description: >-
+        Haalt een metadata-gedefinieerde openbare API volledig op en publiceert
+        de ongewijzigde resultaten naar het landing volume.
+      max_concurrent_runs: 1
+      timeout_seconds: 1200
+
+      email_notifications:
+        on_failure:
+          - data-platform-alerts@contoso.com
+
+      parameters:
+        - name: source_object_id
+          default: NAGER.HOLIDAYS_NL
+        - name: delivery_date
+          default: ""
+
+      tasks:
+        - task_key: extract_to_landing
+          max_retries: 1
+          min_retry_interval_millis: 300000
+          timeout_seconds: 900
+          notebook_task:
+            notebook_path: ../notebooks/09_extract_public_api.py
+            base_parameters:
+              env: ${var.env}
+              source_object_id: "{{job.parameters.source_object_id}}"
+              delivery_date: "{{job.parameters.delivery_date}}"
+              repo_root: ${workspace.file_path}

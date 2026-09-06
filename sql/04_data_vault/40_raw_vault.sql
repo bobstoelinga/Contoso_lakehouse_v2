@@ -374,3 +374,73 @@ SELECT *,
        lead(load_date) OVER (PARTITION BY hk_order_customer ORDER BY load_date) AS load_end_date,
        lead(load_date) OVER (PARTITION BY hk_order_customer ORDER BY load_date) IS NULL AS is_current
 FROM sat_eff_order_customer_h;
+
+CREATE TABLE IF NOT EXISTS hub_price_agreement (
+  hk_price_agreement STRING NOT NULL, agreement_id STRING NOT NULL, bk_collision_code STRING NOT NULL,
+  load_date TIMESTAMP NOT NULL, record_source STRING NOT NULL, _batch_id STRING NOT NULL,
+  CONSTRAINT pk_hub_price_agreement PRIMARY KEY (hk_price_agreement) RELY
+)
+USING DELTA CLUSTER BY (hk_price_agreement)
+COMMENT 'Hub: unieke prijsafspraken uit SharePoint.';
+
+CREATE TABLE IF NOT EXISTS sat_price_agreement_h (
+  hk_price_agreement STRING NOT NULL, load_date TIMESTAMP NOT NULL, hashdiff STRING NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL, customer_segment STRING, product_key STRING,
+  currency_code STRING, list_price DECIMAL(18,4), discount_pct DECIMAL(9,4), valid_from DATE,
+  valid_to DATE, agreement_status STRING, updated_at TIMESTAMP, is_deleted BOOLEAN,
+  CONSTRAINT pk_sat_price_agreement PRIMARY KEY (hk_price_agreement, load_date) RELY
+)
+USING DELTA CLUSTER BY (hk_price_agreement)
+COMMENT 'Satellite: historisatie van prijsafspraken uit SharePoint.';
+
+CREATE TABLE IF NOT EXISTS hub_sales_budget (
+  hk_sales_budget STRING NOT NULL, budget_month DATE NOT NULL, country_code STRING NOT NULL,
+  product_category STRING NOT NULL, bk_collision_code STRING NOT NULL, load_date TIMESTAMP NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL,
+  CONSTRAINT pk_hub_sales_budget PRIMARY KEY (hk_sales_budget) RELY
+)
+USING DELTA CLUSTER BY (hk_sales_budget)
+COMMENT 'Hub: unieke maandbudgetten per land en productcategorie.';
+
+CREATE TABLE IF NOT EXISTS sat_sales_budget_h (
+  hk_sales_budget STRING NOT NULL, load_date TIMESTAMP NOT NULL, hashdiff STRING NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL, budget_id STRING, currency_code STRING,
+  budget_revenue DECIMAL(18,4), budget_units INT, forecast_revenue DECIMAL(18,4), forecast_units INT,
+  approved_at TIMESTAMP, updated_at TIMESTAMP, is_deleted BOOLEAN,
+  CONSTRAINT pk_sat_sales_budget PRIMARY KEY (hk_sales_budget, load_date) RELY
+)
+USING DELTA CLUSTER BY (hk_sales_budget)
+COMMENT 'Satellite: historisatie van verkoopbudgetten uit SharePoint.';
+
+CREATE TABLE IF NOT EXISTS hub_cbs_jeugdzorg (
+  hk_cbs_jeugdzorg STRING NOT NULL, vorm_code STRING NOT NULL, wijk_code STRING NOT NULL,
+  periode_code STRING NOT NULL, bk_collision_code STRING NOT NULL, load_date TIMESTAMP NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL,
+  CONSTRAINT pk_hub_cbs_jeugdzorg PRIMARY KEY (hk_cbs_jeugdzorg) RELY
+)
+USING DELTA CLUSTER BY (hk_cbs_jeugdzorg)
+COMMENT 'Hub: CBS-jeugdzorgobservatie per vorm, wijk en periode.';
+
+CREATE TABLE IF NOT EXISTS sat_cbs_jeugdzorg_h (
+  hk_cbs_jeugdzorg STRING NOT NULL, load_date TIMESTAMP NOT NULL, hashdiff STRING NOT NULL,
+  record_source STRING NOT NULL, _batch_id STRING NOT NULL, jongeren_totaal BIGINT,
+  trajecten_totaal BIGINT, gemeente_naam STRING, regio_type STRING,
+  CONSTRAINT pk_sat_cbs_jeugdzorg PRIMARY KEY (hk_cbs_jeugdzorg, load_date) RELY
+)
+USING DELTA CLUSTER BY (hk_cbs_jeugdzorg)
+COMMENT 'Satellite: CBS-jeugdzorgwaarden en regionale omschrijvingen.';
+
+CREATE OR REPLACE VIEW sat_price_agreement AS
+SELECT *, lead(load_date) OVER (PARTITION BY hk_price_agreement ORDER BY load_date) AS load_end_date,
+       lead(load_date) OVER (PARTITION BY hk_price_agreement ORDER BY load_date) IS NULL AS is_current
+FROM sat_price_agreement_h;
+
+CREATE OR REPLACE VIEW sat_sales_budget AS
+SELECT *, lead(load_date) OVER (PARTITION BY hk_sales_budget ORDER BY load_date) AS load_end_date,
+       lead(load_date) OVER (PARTITION BY hk_sales_budget ORDER BY load_date) IS NULL AS is_current
+FROM sat_sales_budget_h;
+
+CREATE OR REPLACE VIEW sat_cbs_jeugdzorg AS
+SELECT *, lead(load_date) OVER (PARTITION BY hk_cbs_jeugdzorg ORDER BY load_date) AS load_end_date,
+       lead(load_date) OVER (PARTITION BY hk_cbs_jeugdzorg ORDER BY load_date) IS NULL AS is_current
+FROM sat_cbs_jeugdzorg_h;

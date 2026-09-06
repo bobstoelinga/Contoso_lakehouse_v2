@@ -163,6 +163,52 @@ COMMENT 'Gold Actueel slot 1 voor fct_returns.';
 
 CREATE TABLE IF NOT EXISTS fct_returns_v2 LIKE fct_returns_v1;
 
+CREATE TABLE IF NOT EXISTS dim_price_agreement_v1 (
+  price_agreement_hk STRING NOT NULL, agreement_id STRING NOT NULL, customer_segment STRING,
+  product_key STRING, currency_code STRING, list_price DECIMAL(18,4), discount_pct DECIMAL(9,4),
+  valid_from DATE, valid_to DATE, agreement_status STRING, updated_at TIMESTAMP,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (price_agreement_hk);
+CREATE TABLE IF NOT EXISTS dim_price_agreement_v2 LIKE dim_price_agreement_v1;
+
+CREATE TABLE IF NOT EXISTS fct_sales_budget_v1 (
+  sales_budget_hk STRING NOT NULL, budget_month DATE NOT NULL, country_code STRING NOT NULL,
+  product_category STRING NOT NULL, budget_id STRING, currency_code STRING, budget_revenue DECIMAL(18,4),
+  budget_units INT, forecast_revenue DECIMAL(18,4), forecast_units INT, approved_at TIMESTAMP, updated_at TIMESTAMP,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (budget_month, country_code, product_category);
+CREATE TABLE IF NOT EXISTS fct_sales_budget_v2 LIKE fct_sales_budget_v1;
+
+CREATE TABLE IF NOT EXISTS fct_cbs_jeugdzorg_v1 (
+  cbs_jeugdzorg_hk STRING NOT NULL, vorm_code STRING NOT NULL, wijk_code STRING NOT NULL,
+  periode_code STRING NOT NULL, jongeren_totaal BIGINT, trajecten_totaal BIGINT, gemeente_naam STRING, regio_type STRING,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (periode_code, wijk_code);
+CREATE TABLE IF NOT EXISTS fct_cbs_jeugdzorg_v2 LIKE fct_cbs_jeugdzorg_v1;
+
+CREATE TABLE IF NOT EXISTS dim_ecb_exchange_rate_v1 (
+  currency_code STRING NOT NULL, rate_date DATE NOT NULL, rate_to_eur DECIMAL(18,8) NOT NULL,
+  source_series STRING NOT NULL, last_changed_at TIMESTAMP NOT NULL,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (currency_code, rate_date);
+CREATE TABLE IF NOT EXISTS dim_ecb_exchange_rate_v2 LIKE dim_ecb_exchange_rate_v1;
+
+CREATE TABLE IF NOT EXISTS dim_nager_holiday_v1 (
+  holiday_date DATE NOT NULL, holiday_name STRING NOT NULL, local_name STRING, country_code STRING NOT NULL,
+  global_holiday BOOLEAN NOT NULL, holiday_types ARRAY<STRING>, last_changed_at TIMESTAMP NOT NULL,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (holiday_date, country_code);
+CREATE TABLE IF NOT EXISTS dim_nager_holiday_v2 LIKE dim_nager_holiday_v1;
+
+CREATE TABLE IF NOT EXISTS fct_fabric_sales_order_line_v1 (
+  sales_order_detail_id BIGINT NOT NULL, order_quantity INT NOT NULL,
+  unit_price DECIMAL(18,4) NOT NULL, unit_price_discount DECIMAL(9,6) NOT NULL,
+  total_due_amount DECIMAL(18,4) NOT NULL, order_status_code STRING NOT NULL,
+  source_last_modified_at TIMESTAMP NOT NULL,
+  _as_of_delivery_id STRING NOT NULL, _as_of_timestamp TIMESTAMP NOT NULL, _batch_id STRING NOT NULL
+) USING DELTA CLUSTER BY (sales_order_detail_id, source_last_modified_at);
+CREATE TABLE IF NOT EXISTS fct_fabric_sales_order_line_v2 LIKE fct_fabric_sales_order_line_v1;
+
 -- -----------------------------------------------------------------------------
 -- Publieke views. Alleen deze objecten zijn zichtbaar voor BI.
 -- De groepsreleasepointer wordt in één Delta MERGE bijgewerkt; zo zien alle
@@ -262,6 +308,48 @@ WHERE EXISTS (
     AND g.release_status = 'ACTIVE'
     AND p.physical_slot = 'fct_sales_v2'
 );
+
+  CREATE OR REPLACE VIEW dim_price_agreement AS
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_price_agreement_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_PRICE_AGREEMENT' WHERE g.publication_group_id = 'SHAREPOINT_SALES_INPUT' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_price_agreement_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_price_agreement_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_PRICE_AGREEMENT' WHERE g.publication_group_id = 'SHAREPOINT_SALES_INPUT' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_price_agreement_v2');
+
+  CREATE OR REPLACE VIEW fct_sales_budget AS
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_budget_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_SALES_BUDGET' WHERE g.publication_group_id = 'SHAREPOINT_SALES_INPUT' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_sales_budget_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_sales_budget_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_SALES_BUDGET' WHERE g.publication_group_id = 'SHAREPOINT_SALES_INPUT' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_sales_budget_v2');
+
+  CREATE OR REPLACE VIEW fct_cbs_jeugdzorg AS
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_cbs_jeugdzorg_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_CBS_JEUGDZORG' WHERE g.publication_group_id = 'CBS_JEUGDZORG_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_cbs_jeugdzorg_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_cbs_jeugdzorg_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_CBS_JEUGDZORG' WHERE g.publication_group_id = 'CBS_JEUGDZORG_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_cbs_jeugdzorg_v2');
+
+  CREATE OR REPLACE VIEW dim_ecb_exchange_rate AS
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_ecb_exchange_rate_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_ECB_EXCHANGE_RATE' WHERE g.publication_group_id = 'ECB_REFERENCE_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_ecb_exchange_rate_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_ecb_exchange_rate_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_ECB_EXCHANGE_RATE' WHERE g.publication_group_id = 'ECB_REFERENCE_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_ecb_exchange_rate_v2');
+
+  CREATE OR REPLACE VIEW dim_nager_holiday AS
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_nager_holiday_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_NAGER_HOLIDAY' WHERE g.publication_group_id = 'NAGER_REFERENCE_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_nager_holiday_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.dim_nager_holiday_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_DIM_NAGER_HOLIDAY' WHERE g.publication_group_id = 'NAGER_REFERENCE_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'dim_nager_holiday_v2');
+
+  CREATE OR REPLACE VIEW fct_fabric_sales_order_line AS
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_fabric_sales_order_line_v1
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_FABRIC_SALES_ORDER_LINE' WHERE g.publication_group_id = 'FABRIC_SALES_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_fabric_sales_order_line_v1')
+  UNION ALL
+  SELECT * FROM contoso_gold_${env}.current_internal.fct_fabric_sales_order_line_v2
+  WHERE EXISTS (SELECT 1 FROM contoso_meta_${env}.audit.audit_gold_publication_group g JOIN contoso_meta_${env}.audit.audit_gold_publication p ON p.batch_id = g.batch_id AND p.gold_entity_id = 'GC_FCT_FABRIC_SALES_ORDER_LINE' WHERE g.publication_group_id = 'FABRIC_SALES_MART' AND g.release_status = 'ACTIVE' AND p.physical_slot = 'fct_fabric_sales_order_line_v2');
 
   CREATE OR REPLACE VIEW fct_returns
   COMMENT 'Gold Actueel: retourfeiten van de laatste succesvolle business load.'

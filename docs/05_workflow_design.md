@@ -47,6 +47,26 @@ trigger:
 Auto Loader start Bronze zodra er bestanden binnenkomen. `wait_after_last_change`
 voorkomt dat de run start terwijl het bronsysteem nog bezig is met uploaden.
 
+## Publieke API-extracten
+
+CBS StatLine, ECB-wisselkoersen en Nager-vakantiedagen lopen via dezelfde
+metadata-gedreven extractjob. Per connector staat in `request_options` een
+begrensde `timeout_seconds`, `total_timeout_seconds`, `max_retries` en
+`retry_delay_seconds`. De totale deadline geldt over alle pagina's en retries
+van één object. Alleen timeouts, verbindingsfouten, HTTP 408/429 en HTTP 5xx
+worden met exponential backoff opnieuw geprobeerd; configuratiefouten en
+overige 4xx-antwoorden falen direct.
+
+De extractor schrijft uitsluitend naar een bron-specifieke stagingfolder. De
+socket wordt per HTTP-poging contextmatig gesloten. Bij een fout of task-timeout
+verwijdert `finally` de stagingfolder, registreert `AuditLogger` een `FAILED`
+event in `audit_load_run_event` met laag `LANDING` en faalt de taak. Daardoor
+wordt geen gedeeltelijke extractie naar het landingvolume gepubliceerd en kan
+Auto Loader niets verversen. Pas na een volledig extract inclusief manifest
+wordt staging naar de datumfolder verplaatst. De workflow begrenst de taak op
+vijftien minuten als platformvangnet, herstart hem eenmaal na vijf minuten en
+verstuurt bij definitief falen de standaard job-alert.
+
 ## De gate
 
 De gate is geen hardcoded `depends_on` maar een metadata-uitspraak:

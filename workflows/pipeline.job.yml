@@ -108,17 +108,30 @@ resources:
             notebook_path: ../notebooks/30_data_vault.py
             base_parameters:
               env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
               zone: RAW_VAULT
               delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
               batch_id: "{{tasks.delivery_gate.values.batch_id}}"
               repo_root: ${workspace.file_path}
 
+        - task_key: reference_data
+          depends_on: [{ task_key: quality }]
+          notebook_task:
+            notebook_path: ../notebooks/31_reference_data.py
+            base_parameters:
+              env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
+              delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
+              batch_id: "{{tasks.delivery_gate.values.batch_id}}"
+              repo_root: ${workspace.file_path}
+
         - task_key: business_vault
-          depends_on: [{ task_key: raw_vault }]
+          depends_on: [{ task_key: raw_vault }, { task_key: reference_data }]
           notebook_task:
             notebook_path: ../notebooks/30_data_vault.py
             base_parameters:
               env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
               zone: BUSINESS_VAULT
               delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
               batch_id: "{{tasks.delivery_gate.values.batch_id}}"
@@ -131,6 +144,7 @@ resources:
             notebook_path: ../notebooks/40_gold_historical.py
             base_parameters:
               env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
               delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
               batch_id: "{{tasks.delivery_gate.values.batch_id}}"
               repo_root: ${workspace.file_path}
@@ -143,6 +157,7 @@ resources:
             notebook_path: ../notebooks/41_gold_current.py
             base_parameters:
               env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
               delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
               batch_id: "{{tasks.delivery_gate.values.batch_id}}"
               repo_root: ${workspace.file_path}

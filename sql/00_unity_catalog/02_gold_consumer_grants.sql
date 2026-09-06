@@ -10,6 +10,7 @@ GRANT SELECT ON TABLE contoso_gold_${env}.historical.dim_product_hist TO `${bi_a
 GRANT SELECT ON TABLE contoso_gold_${env}.historical.fct_sales_hist TO `${bi_analysts_group}`;
 GRANT SELECT ON TABLE contoso_gold_${env}.historical.dim_employee_hist TO `${bi_analysts_group}`;
 GRANT SELECT ON TABLE contoso_gold_${env}.historical.fct_returns_hist TO `${bi_analysts_group}`;
+GRANT SELECT ON TABLE contoso_gold_${env}.historical.fct_fabric_sales_order_line_hist TO `${bi_analysts_group}`;
 
 -- Actuele datamart: uitsluitend publieke views, nooit de fysieke slots.
 GRANT SELECT ON VIEW contoso_gold_${env}.current.dim_customer TO `${bi_analysts_group}`;
@@ -18,4 +19,5 @@ GRANT SELECT ON VIEW contoso_gold_${env}.current.fct_sales TO `${bi_analysts_gro
 GRANT SELECT ON VIEW contoso_gold_${env}.current.dim_employee TO `${bi_analysts_group}`;
 GRANT SELECT ON VIEW contoso_gold_${env}.current.dim_date TO `${bi_analysts_group}`;
 GRANT SELECT ON VIEW contoso_gold_${env}.current.fct_returns TO `${bi_analysts_group}`;
+GRANT SELECT ON VIEW contoso_gold_${env}.current.fct_fabric_sales_order_line TO `${bi_analysts_group}`;
 GRANT SELECT ON VIEW contoso_gold_${env}.current.v_gold_freshness TO `${bi_analysts_group}`;

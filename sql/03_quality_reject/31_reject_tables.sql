@@ -52,20 +52,48 @@ ALTER TABLE rj_employees SET TBLPROPERTIES (comment = 'Reject: afgekeurde medewe
 CREATE TABLE IF NOT EXISTS rj_returns LIKE rj_customers;
 ALTER TABLE rj_returns SET TBLPROPERTIES (comment = 'Reject: afgekeurde retourregels, herverwerkbaar.');
 
+USE SCHEMA cbs;
+CREATE TABLE IF NOT EXISTS rj_jeugdzorg_wijk_2025 LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_jeugdzorg_wijk_2025 SET TBLPROPERTIES (comment = 'Reject: afgekeurde CBS-jeugdzorgrecords, herverwerkbaar.');
+
+USE SCHEMA ecb;
+CREATE TABLE IF NOT EXISTS rj_exchange_rate LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_exchange_rate SET TBLPROPERTIES (comment = 'Reject: afgekeurde ECB-wisselkoersen, herverwerkbaar.');
+
+USE SCHEMA sharepoint;
+CREATE TABLE IF NOT EXISTS rj_price_agreements LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_price_agreements SET TBLPROPERTIES (comment = 'Reject: afgekeurde SharePoint-prijsafspraken, herverwerkbaar.');
+CREATE TABLE IF NOT EXISTS rj_sales_budgets LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_sales_budgets SET TBLPROPERTIES (comment = 'Reject: afgekeurde SharePoint-verkoopbudgetten, herverwerkbaar.');
+
+USE SCHEMA nager;
+CREATE TABLE IF NOT EXISTS rj_holidays_nl LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_holidays_nl SET TBLPROPERTIES (comment = 'Reject: afgekeurde Nager.Date-feestdagen, herverwerkbaar.');
+
 -- Operationeel overzicht voor data stewards.
 CREATE OR REPLACE VIEW v_open_rejects
 COMMENT 'Alle openstaande rejects over alle bronobjecten heen.'
 AS
 WITH open_rejects AS (
-  SELECT * FROM rj_customers WHERE reject_status = 'OPEN'
+  SELECT * FROM contoso_reject_${env}.sales.rj_customers WHERE reject_status = 'OPEN'
   UNION ALL
-  SELECT * FROM rj_products WHERE reject_status = 'OPEN'
+  SELECT * FROM contoso_reject_${env}.sales.rj_products WHERE reject_status = 'OPEN'
   UNION ALL
-  SELECT * FROM rj_orders WHERE reject_status = 'OPEN'
+  SELECT * FROM contoso_reject_${env}.sales.rj_orders WHERE reject_status = 'OPEN'
   UNION ALL
-  SELECT * FROM rj_employees WHERE reject_status = 'OPEN'
+  SELECT * FROM contoso_reject_${env}.sales.rj_employees WHERE reject_status = 'OPEN'
   UNION ALL
-  SELECT * FROM rj_returns WHERE reject_status = 'OPEN'
+  SELECT * FROM contoso_reject_${env}.sales.rj_returns WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.cbs.rj_jeugdzorg_wijk_2025 WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.ecb.rj_exchange_rate WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.sharepoint.rj_price_agreements WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.sharepoint.rj_sales_budgets WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.nager.rj_holidays_nl WHERE reject_status = 'OPEN'
 )
 SELECT source_object_id, _delivery_id, _delivery_date, r.reason_code, r.reason_text, count(*) AS reject_count
 FROM open_rejects

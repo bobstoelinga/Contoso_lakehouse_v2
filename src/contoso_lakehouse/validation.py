@@ -109,7 +109,10 @@ class MetadataValidator:
     def validate_gold(self) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
         known = {e.gold_entity_id for e in self.repo.gold_entities()}
+        group_sources: dict[str, set[str]] = {}
         for entity in self.repo.gold_entities():
+            if entity.publication_group_id:
+                group_sources.setdefault(entity.publication_group_id, set()).add(entity.source_system_id)
             for dep in entity.depends_on_gold_entity_ids:
                 if dep not in known:
                     issues.append(ValidationIssue(
@@ -135,6 +138,12 @@ class MetadataValidator:
             err = self._explain(entity.select_sql)
             if err:
                 issues.append(ValidationIssue("GOLD", entity.gold_entity_id, err))
+        for group, source_systems in group_sources.items():
+            if len(source_systems) > 1:
+                issues.append(ValidationIssue(
+                    "GOLD", group,
+                    f"Publication group bevat meerdere bronsystemen: {sorted(source_systems)}",
+                ))
         return issues
 
     def validate_all(self) -> list[ValidationIssue]:

@@ -1,111 +1,99 @@
 # LinkedIn-artikel
 
-## Van idee naar metadata-gedreven ETL: een Databricks-concept ontwikkeld met AI
+## Samen met AI een lakehouse bouwen: de waarde zat in wat er daarna misging
 
-Een metadata-gedreven ETL-platform ontwerpen klinkt overzichtelijk totdat de eerste echte vragen op tafel komen.
+In dit praktijkexperiment heb ik samen met AI een metadata-gedreven lakehouse voor een Contoso Sales-case ontworpen, uitgevoerd en gedocumenteerd. Het is gebouwd op Databricks met Unity Catalog, Delta Lake, Auto Loader en Data Vault 2.0.
 
-Wat gebeurt er als drie bestanden niet tegelijk binnenkomen? Hoe voorkom je dat een nieuwe bronkolom stilletjes verdwijnt? Wat doe je met afgekeurde records? En hoe zorg je ervoor dat een actuele datamart nooit een mix toont van nieuwe dimensies en oude feiten?
+AI versnelde de analyse, uitwerking, tests en documentatie. Ik bepaalde de requirements, stelde de kritische vragen, koos de grenzen en beoordeelde de uitkomst. Dat onderscheid is belangrijk: AI kan opties genereren en patronen helpen uitwerken, maar productierisico's wegen en een release accepteren blijft mensenwerk.
 
-Voor een Contoso Sales-case heb ik samen met AI een conceptuele lakehouse-oplossing uitgewerkt op Databricks, met Unity Catalog, Delta Lake, Auto Loader en Data Vault 2.0. Dit artikel beschrijft een leer- en ontwikkelproject, geen productieadvies.
+Het volledige project en de technische documentatie staan op [GitHub](https://github.com/bobstoelinga/Contoso_lakehouse_v2). Het [projectverslag](https://github.com/bobstoelinga/Contoso_lakehouse_v2/blob/main/docs/06_projectverslag.md) bevat de requirements, besluiten, testresultaten en openstaande acties.
 
-**Transparant:** dit artikel en het bijbehorende conceptuele project zijn ontwikkeld met ondersteuning van AI. AI hielp bij analyse, uitwerking en documentatie. De ontwerpkeuzes, controles en uiteindelijke beoordeling heb ik zelf gedaan.
+## De opdracht
 
-## Meer informatie
-
-Het volledige project en de technische documentatie zijn beschikbaar op [GitHub](https://github.com/bobstoelinga/Contoso_lakehouse_v2).
-
-Lees ook het [volledige projectverslag](https://github.com/bobstoelinga/Contoso_lakehouse_v2/blob/main/docs/06_projectverslag.md) met de requirements, architectuur, mijlpalen, testresultaten, openstaande acties en productie-readiness.
-
-## Het uitgangspunt
-
-De gewenste keten was:
+De gewenste straat was helder:
 
 `Volume -> Bronze -> Quality/Reject -> Data Vault -> Gold Historisch -> Gold Actueel`
 
-Orders, Customers en Products worden per ontvangstdatum aangeleverd. Alle objecten, mappings, kwaliteitsregels en afhankelijkheden moesten metadata-gedreven zijn. Het doel was niet alleen een pipeline die vandaag werkt, maar een framework waarin nieuwe bronobjecten zoveel mogelijk zonder nieuwe notebooklogica kunnen worden toegevoegd.
+Orders, Customers en Products moesten per ontvangstdatum worden verwerkt. Alle objecten, mappings, kwaliteitsregels en afhankelijkheden moesten metadata-gedreven zijn. Een actuele datamart mocht pas wijzigen wanneer een volledige, consistente nieuwe versie klaarstond.
 
-## De architectuurkeuzes
+Dat klinkt overzichtelijk. Tot de echte vragen komen: wat als drie bestanden niet tegelijk arriveren? Wat gebeurt er met een nieuwe bronkolom? Wanneer blokkeert een kwaliteitsprobleem de rest van de keten? En hoe voorkom je dat een actuele mart nieuwe dimensies naast oude feiten toont?
 
-### 1. Een delivery is meer dan een bestand
+## Wat we samen hebben ontworpen
 
-Auto Loader denkt in bestanden. De business denkt in leveringen.
+### Een delivery is meer dan een bestand
 
-Daarom wordt een micro-batch gesplitst per deliverydatum en chronologisch verwerkt. Een delivery-gate controleert of alle verplichte bronobjecten succesvol in Bronze staan. Een latere levering mag niet vóór een oudere onvolledige levering worden verwerkt wanneer dat de historische juistheid kan aantasten.
+Auto Loader ziet bestanden; de business ziet leveringen. Daarom wordt een micro-batch per deliverydatum gesplitst en chronologisch verwerkt. Een delivery-gate laat verwerking pas door wanneer alle verplichte bronobjecten succesvol in Bronze staan.
 
-### 2. Metadata is het besturingsmodel
+Een complete Landing-delivery is idempotent. Een herhaalrun overschrijft geen immutable data, maar kan de vervolgketen veilig hervatten. Een bestaande folder zonder manifest faalt expliciet.
 
-Bronobjecten, laadstrategieën, mappings, DQ-regels, Data Vault-entiteiten en Gold-definities staan in metadata. De workflow bevat vooral de lagen; de inhoudelijke volgorde komt uit de afhankelijkheidsgraaf.
+### Metadata bestuurt de keten
 
-Daarbij is metadata niet zomaar een configuratietabel. SQL-expressies in metadata kunnen uitvoeringsrechten krijgen. Daarom is gekozen voor Git als bron van waarheid, deployment via Databricks Asset Bundles, read-only metadata in productie en validatie van identifiers en SQL-expressies.
+Bronobjecten, laadstrategieën, mappings, DQ-regels, Data Vault-entiteiten en Gold-definities staan in metadata. De workflow orkestreert lagen; de inhoudelijke volgorde komt uit een afhankelijkheidsgraaf.
 
-### 3. Data Vault als historische ruggengraat
+Ik koos Git als bron van waarheid, Databricks Asset Bundles voor deployment en validatie van identifiers en SQL-expressies. Dat is geen administratie. Metadata met uitvoerbare SQL is onderdeel van het aanvals- en foutoppervlak en moet dus als product worden beheerd.
 
-Hubs en links gebruiken SHA-256 met een vastgelegde hash-conventie. De bronidentiteit wordt meegenomen in de collision code, zodat dezelfde business key uit verschillende systemen niet onbedoeld samenvalt.
+### Bronze bewaart, Quality contracteert
 
-Satellites zijn fysiek insert-only. Historische einddatums worden in views afgeleid. Dat voorkomt voortdurende updates op historische Delta-bestanden en past beter bij schaalbare historisatie.
+Schema evolution bleek een nuttige proef. Bronze bewaart nu de volledige bronstructuur plus technische lineage. Quality projecteert daarna alleen het expliciet gemapte contract. Nieuwe velden verdwijnen dus niet stilletjes en blijven beschikbaar voor analyse, contractuitbreiding en onderzoek.
 
-### 4. Quality moet herstelbaar zijn
+### Historie en actuele data krijgen elk hun eigen taak
 
-Een afgekeurde rij is geen losse foutmelding. De rejectlaag bewaart de volledige payload, alle faalredenen en een status voor opvolging. Daardoor blijft zichtbaar waarom een record is afgewezen en kan een organisatie later een gecontroleerd herstelproces uitvoeren.
+Hubs en links gebruiken SHA-256 met een vaste conventie en een brongebonden collision code. Satellites zijn insert-only. Historische einddatums worden in views afgeleid.
 
-### 5. Actueel publiceren als één geheel
+Voor Gold Actueel wordt een nieuwe release eerst in een inactief slot gebouwd. Pas als de complete publication group is geslaagd, wisselt een releasepointer. Faalt één fact of dimensie, dan blijft de vorige consistente versie zichtbaar voor BI.
 
-De actuele datamart gebruikt twee fysieke slots. Een nieuwe release wordt volledig opgebouwd in het inactieve slot. Pas wanneer alle entiteiten van de publication group succesvol zijn opgebouwd, wordt één releasepointer gewijzigd.
+## Waar het praktijkexperiment werkelijk werd getest
 
-Een fout in één fact of dimensie laat de vorige complete release actief. Dat is een klein technisch detail met grote gevolgen voor de betrouwbaarheid van BI-consumenten.
+Het interessantste deel was niet het eerste diagram. Dat waren de fouten die het diagram moesten overleven.
 
-## AI als ontwikkelpartner
-
-AI heeft in dit project geholpen bij het uitwerken van Python-frameworkcode, SQL-DDL, metadata-seeds, workflows, tests en documentatie. De waarde zat vooral in het snel verkennen van ontwerpopties en het zichtbaar maken van consequenties.
-
-Maar AI vervangt geen architectuurverantwoordelijkheid. De lastigste problemen kwamen juist naar voren tijdens validatie:
-
-- Serverless ondersteunde een aanvankelijk gekozen sessieconfiguratie niet.
+- Serverless ondersteunde een gekozen sessieconfiguratie niet.
 - Een metadata-placeholder veroorzaakte een SQL-parsefout.
-- Een typefout in een Gold-query blokkeerde alleen de actuele factpublicatie.
-- Een chronologische gate verwerkte bewust een oudere geblokkeerde levering vóór een nieuwere valide levering.
+- Een fout in een Gold-query blokkeerde uitsluitend de actuele factpublicatie.
+- Een chronologische gate hield terecht een nieuwere levering tegen achter een oudere, onvolledige delivery.
 - Een stresstestgenerator produceerde eerst onbruikbare datumwaarden onder Spark Connect.
+- De ECB-SDMX-feed bevatte 2.417 lege observaties. Die moesten in Bronze behouden blijven, maar niet als geldige koers naar Quality. De oplossing was een metadata-gedreven Quality-filter, niet het versoepelen van de kwaliteitsdrempel.
+- Een metadata-attribuut bestond al in de Python-code en seedbestanden, maar niet in de fysieke metadatatabel. Pas na een schema-aware migratie had de configuratie daadwerkelijk effect.
 
-Elke fout leidde tot een codefix, regressietest en een nieuw architectuurbesluit. Dat is voor mij de kern van AI-ondersteund ontwikkelen: snel bouwen, maar iedere aanname laten botsen met een test, runtime of expliciet contract.
+Bij elk incident hielp AI mogelijke oorzaken, codewijzigingen en tests te formuleren. Ik hield de architectuur scherp door de kernvraag steeds terug te brengen tot: wat is hier feitelijk bewezen, en wat alleen aannemelijk?
 
-## Wat is aangetoond?
+## Wat in dev is bewezen
 
-Tijdens de ontwikkeling zijn in de beschikbare dev-omgeving onder andere de volgende onderdelen getest:
+- Metadata-validatie vóór verwerking.
+- Bronze-fan-out, delivery-gates en chronologische verwerking.
+- Quality-blokkade, Reject-registratie en gecontroleerde remediation.
+- Raw Vault, Business Vault, Gold Historisch en atomisch Gold Actueel.
+- Zelfstandige extract- en laadprocessen voor CBS, ECB en Nager.Date.
+- Volledige schema-evolutie en technische lineage voor de uitgebreide ECB-SDMX-structuur.
+- `ECB|2026-09-05` volledig van extract tot Gold verwerkt, met 262.410 actuele koersrecords.
+- Gold-output gecontroleerd voor alle actieve Sales-, CBS-, ECB- en Nager-producten.
+- Een lokale regressiesuite met 101 geslaagde tests.
+- Een testdelivery met 1.000.000 Orders en in totaal 1.180.000 records.
 
-- metadata-validatie vóór verwerking;
-- Bronze-fan-out met meerdere bronobjecten;
-- delivery-gates en chronologische verwerking;
-- Quality-blokkade en Reject-registratie;
-- Raw Vault, Business Vault en Gold Historisch;
-- atomische publicatie van de actuele `SALES_MART`;
-- gecontroleerde superseding van een geblokkeerde demo-delivery;
-- een lokale regressiesuite met 69 geslaagde tests;
-- een grote testdelivery met 1.000.000 Orders en in totaal 1.180.000 records.
+Een koppeling met een interne Microsoft Fabric-databaseview is bewust buiten deze demonstratiescope gehouden. Die zou vooral Entra-identity, secretbeheer en cross-platformconnectiviteit aantonen. De kern van de metadata-gedreven keten is al met bestanden en publieke API's end-to-end bewezen.
 
 ## Zijn we productieklaar?
 
-Nee, nog niet.
+Nee.
 
-Dat is geen teleurstellende conclusie, maar een nuttige grens. Het ontwerp is een sterke conceptuele en technische basis. Voor productie ontbreken nog bewijs en operationalisering voor onder meer:
+Dat is geen tekortkoming van een demo, maar de juiste conclusie op basis van de beschikbare bewijslast. Voor productie zijn onder meer nog nodig:
 
 - tien opeenvolgende representatieve deliveries;
 - SCD2-, delete- en effectivity-validatie met echte wijzigingen;
-- alle negatieve herstelproeven;
-- CDC en partial snapshots;
-- governancevelden voor owner, PII, retentie, SLA en kostenplaats;
+- negatieve herstelproeven, CDC en partial snapshots;
+- governance voor eigenaar, PII, retentie, SLA en kostenplaats;
 - formele security-, disaster-recovery- en RPO/RTO-tests;
 - runbooks, alerting, on-call en reject-herverwerking;
 - gemeten DBU-, opslag- en egresskosten.
 
-Een groen architectuurdiagram is dus niet hetzelfde als een productieplatform. Productierijpheid ontstaat wanneer ontwerp, code, data, beveiliging, operatie en kosten gezamenlijk zijn bewezen.
+## Mijn belangrijkste les uit dit project
 
-## De belangrijkste les
+AI kan het denk- en ontwikkelproces versnellen: alternatieven vergelijken, repetitieve uitwerking doen, tests formuleren en een fout als aanwijzing behandelen in plaats van als eindpunt.
 
-Metadata-gedreven betekent niet dat alles automatisch veilig en schaalbaar is. Metadata moet zelf worden beheerd als product: versieerbaar, valideerbaar, beveiligd, traceerbaar en voorzien van duidelijke eigenaars.
+Maar ik moet nog steeds het doel bepalen, aannames uitdagen, risico's wegen en accepteren of weigeren. Juist wanneer de code er overtuigend uitziet, is die menselijke rol het belangrijkst.
 
-AI versnelt het denk- en ontwikkelproces aanzienlijk. De menselijke rol verschuift daardoor niet naar de achtergrond. Die wordt juist belangrijker bij het bepalen van grenzen, het beoordelen van risico’s en het weigeren van een productie-release zolang de bewijslast niet compleet is.
+Dit project eindigde daarom niet met de vraag: “Werkt de pipeline?”
 
-Dit project eindigde daarom niet met de vraag “werkt de pipeline?”, maar met de betere vraag:
+Maar met de betere vraag:
 
 **Onder welke voorwaarden mogen we erop vertrouwen?**
 

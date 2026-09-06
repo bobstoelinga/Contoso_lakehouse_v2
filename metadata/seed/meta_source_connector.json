@@ -1,0 +1,60 @@
+[
+  {
+    "source_object_id": "CBS.JEUGDZORG_WIJK_2025",
+    "connector_type": "HTTP_JSON",
+    "endpoint_url": "https://opendata.cbs.nl/ODataApi/OData/86204NED/TypedDataSet",
+    "response_format": "JSON",
+    "records_key": "value",
+    "next_link_key": "@odata.nextLink",
+      "request_options": {
+        "timeout_seconds": "60",
+        "max_retries": "3",
+        "retry_delay_seconds": "2",
+        "total_timeout_seconds": "600"
+      },
+    "is_active": true
+  },
+  {
+    "source_object_id": "ECB.EXCHANGE_RATE",
+    "connector_type": "HTTP_CSV",
+    "endpoint_url": "https://data-api.ecb.europa.eu/service/data/EXR/D..EUR.SP00.A?format=csvdata",
+    "response_format": "CSV",
+    "records_key": null,
+    "next_link_key": null,
+      "request_options": {
+        "timeout_seconds": "60",
+        "max_retries": "3",
+        "retry_delay_seconds": "2",
+        "total_timeout_seconds": "600"
+      },
+    "is_active": true
+  },
+  {
+    "source_object_id": "NAGER.HOLIDAYS_NL",
+    "connector_type": "HTTP_JSON",
+    "endpoint_url": "https://date.nager.at/api/v3/PublicHolidays/2026/NL",
+    "response_format": "JSON",
+    "records_key": "",
+    "next_link_key": null,
+      "request_options": {
+        "timeout_seconds": "30",
+        "max_retries": "2",
+        "retry_delay_seconds": "1",
+        "total_timeout_seconds": "180"
+      },
+    "is_active": true
+  },
+  {
+    "source_object_id": "FABRIC_SALES.ORDER_LINES",
+    "connector_type": "JDBC",
+    "endpoint_url": "jdbc:sqlserver://qugtl6ion76ufa4fuwoc6cpmdi-rqr26cxjvolujgkdq6tknur6xu.database.fabric.microsoft.com:1433;databaseName=Contoso_database-a2e53891-642a-4a0c-9a7f-c72e1351ff57;encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.database.windows.net;loginTimeout=30;authentication=ActiveDirectoryServicePrincipal",
+    "response_format": "PARQUET",
+    "records_key": null,
+    "next_link_key": null,
+    "request_options": {
+      "secret_scope": "fabric-extract",
+      "source_query": "SELECT * FROM SalesLT.vw_databricks_sales_order_line"
+    },
+    "is_active": true
+  }
+]

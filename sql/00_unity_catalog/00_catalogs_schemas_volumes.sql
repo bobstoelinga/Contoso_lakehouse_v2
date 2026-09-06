@@ -27,6 +27,55 @@ CREATE VOLUME IF NOT EXISTS raw_${env}.sales.checkpoints
 CREATE VOLUME IF NOT EXISTS raw_${env}.sales.quarantine
   COMMENT 'Bestanden/records die niet leesbaar waren tijdens Bronze ingest.';
 
+CREATE SCHEMA IF NOT EXISTS raw_${env}.cbs
+  COMMENT 'Landing voor openbare CBS StatLine-leveringen.';
+CREATE EXTERNAL VOLUME IF NOT EXISTS raw_${env}.cbs.landing
+  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/cbs'
+  COMMENT 'Immutable CBS API-deliveries per extractdatum.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.cbs.checkpoints
+  COMMENT 'Auto Loader checkpoint- en schemalocaties voor CBS-bronobjecten.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.cbs.quarantine
+  COMMENT 'Onleesbare of corrupte CBS-bestanden.';
+
+CREATE SCHEMA IF NOT EXISTS raw_${env}.ecb
+  COMMENT 'Landing voor openbare ECB Data API-leveringen.';
+CREATE EXTERNAL VOLUME IF NOT EXISTS raw_${env}.ecb.landing
+  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/ecb'
+  COMMENT 'Immutable ECB API-deliveries per extractdatum.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.ecb.checkpoints
+  COMMENT 'Auto Loader checkpoint- en schemalocaties voor ECB-bronobjecten.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.ecb.quarantine
+  COMMENT 'Onleesbare of corrupte ECB-bestanden.';
+
+CREATE SCHEMA IF NOT EXISTS raw_${env}.nager
+  COMMENT 'Landing voor openbare Nager.Date-feestdagenleveringen.';
+CREATE EXTERNAL VOLUME IF NOT EXISTS raw_${env}.nager.landing
+  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/nager'
+  COMMENT 'Immutable Nager.Date API-deliveries per extractdatum.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.nager.checkpoints
+  COMMENT 'Auto Loader checkpoint- en schemalocaties voor Nager-bronobjecten.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.nager.quarantine
+  COMMENT 'Onleesbare of corrupte Nager-bestanden.';
+
+CREATE SCHEMA IF NOT EXISTS raw_${env}.sharepoint
+  COMMENT 'Landing voor ongestructureerde bestandsaanleveringen uit SharePoint.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.sharepoint.landing
+  COMMENT 'Immutable landing van door de SharePoint-connector opgehaalde bestanden.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.sharepoint.checkpoints
+  COMMENT 'Auto Loader checkpoint- en schemalocaties voor SharePoint-bronobjecten.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.sharepoint.quarantine
+  COMMENT 'Onleesbare of corrupte SharePoint-bestanden.';
+
+CREATE SCHEMA IF NOT EXISTS raw_${env}.fabric_sales
+  COMMENT 'Landing voor immutable Fabric SQL orderregel-snapshots.';
+CREATE EXTERNAL VOLUME IF NOT EXISTS raw_${env}.fabric_sales.landing
+  LOCATION 'abfss://landing@${storage_account}.dfs.core.windows.net/fabric_sales'
+  COMMENT 'Immutable Fabric SQL orderregel-snapshots per extractdatum.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.fabric_sales.checkpoints
+  COMMENT 'Auto Loader checkpoint- en schemalocaties voor Fabric Sales.';
+CREATE VOLUME IF NOT EXISTS raw_${env}.fabric_sales.quarantine
+  COMMENT 'Onleesbare of corrupte Fabric Sales-bestanden.';
+
 -- -----------------------------------------------------------------------------
 -- 2. Metadata (control framework)
 -- -----------------------------------------------------------------------------
@@ -47,6 +96,11 @@ CREATE CATALOG IF NOT EXISTS contoso_bronze_${env}
 
 CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.sales
   COMMENT 'Bronze tabellen van het bronsysteem SALES.';
+CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.cbs;
+CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.ecb;
+CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.nager;
+CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.sharepoint;
+CREATE SCHEMA IF NOT EXISTS contoso_bronze_${env}.fabric_sales;
 
 -- -----------------------------------------------------------------------------
 -- 4. Quality
@@ -56,6 +110,11 @@ CREATE CATALOG IF NOT EXISTS contoso_quality_${env}
 
 CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.sales
   COMMENT 'Goedgekeurde records per bronobject.';
+CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.cbs;
+CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.ecb;
+CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.nager;
+CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.sharepoint;
+CREATE SCHEMA IF NOT EXISTS contoso_quality_${env}.fabric_sales;
 
 -- -----------------------------------------------------------------------------
 -- 5. Reject
@@ -65,6 +124,11 @@ CREATE CATALOG IF NOT EXISTS contoso_reject_${env}
 
 CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.sales
   COMMENT 'Afgekeurde records per bronobject.';
+CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.cbs;
+CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.ecb;
+CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.nager;
+CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.sharepoint;
+CREATE SCHEMA IF NOT EXISTS contoso_reject_${env}.fabric_sales;
 
 -- -----------------------------------------------------------------------------
 -- 6. Data Vault

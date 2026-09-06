@@ -110,6 +110,23 @@ class BronzeLoader:
         """Schrijft een levering volgens de metadata-gedefinieerde laadstrategie."""
         source_view = f"_bronze_{obj.source_object_id.replace('.', '_').lower()}"
         keys = [safe_identifier(column) for column in obj.business_key_columns]
+        if getattr(obj, "schema_drift_policy", "STRICT") == "RESCUE":
+            mapped = {
+                mapping.source_column
+                for mapping in self.repo.mappings(obj.source_object_id, "QUALITY")
+                if mapping.source_column
+            }
+            technical = {
+                "_delivery_id", "_delivery_date", "_source_file_path", "_source_file_name",
+                "_source_file_size", "_source_file_mtime", "_ingest_timestamp", "_batch_id",
+                "_record_source", "_rescued_data",
+            }
+            extra_columns = [column for column in slice_df.columns if column not in mapped | technical]
+            if extra_columns:
+                slice_df = slice_df.withColumn(
+                    "_rescued_data",
+                    F.to_json(F.struct(*[F.col(column) for column in extra_columns])),
+                ).drop(*extra_columns)
         dedupe_columns = ["_source_file_path", "_delivery_id", *keys]
         slice_df.dropDuplicates(dedupe_columns).createOrReplaceTempView(source_view)
         key_match = " AND ".join(f"t.{column} <=> s.{column}" for column in keys)

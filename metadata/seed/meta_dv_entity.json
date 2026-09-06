@@ -147,6 +147,42 @@
     "record_source_expr": "'BV.ORDER_LINE'", "load_order": 50, "is_active": true
   },
   {
+    "dv_entity_id": "HUB_PRICE_AGREEMENT", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_price_agreement",
+    "hash_key_column": "hk_price_agreement", "parent_entity_ids": null, "business_key_columns": ["agreement_id"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'SHAREPOINT.PRICE_AGREEMENTS'", "load_order": 10, "is_active": false
+  },
+  {
+    "dv_entity_id": "SAT_PRICE_AGREEMENT", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_price_agreement",
+    "hash_key_column": "hk_price_agreement", "parent_entity_ids": ["HUB_PRICE_AGREEMENT"], "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'SHAREPOINT.PRICE_AGREEMENTS'", "load_order": 20, "is_active": false
+  },
+  {
+    "dv_entity_id": "HUB_SALES_BUDGET", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_sales_budget",
+    "hash_key_column": "hk_sales_budget", "parent_entity_ids": null, "business_key_columns": ["budget_month", "country_code", "product_category"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'SHAREPOINT.SALES_BUDGETS'", "load_order": 10, "is_active": false
+  },
+  {
+    "dv_entity_id": "SAT_SALES_BUDGET", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_sales_budget",
+    "hash_key_column": "hk_sales_budget", "parent_entity_ids": ["HUB_SALES_BUDGET"], "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'SHAREPOINT.SALES_BUDGETS'", "load_order": 20, "is_active": false
+  },
+  {
+    "dv_entity_id": "HUB_CBS_JEUGDZORG", "dv_entity_type": "HUB", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "hub_cbs_jeugdzorg",
+    "hash_key_column": "hk_cbs_jeugdzorg", "parent_entity_ids": null, "business_key_columns": ["vorm_code", "wijk_code", "periode_code"], "hashdiff_column": null,
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'CBS.JEUGDZORG_WIJK_2025'", "load_order": 10, "is_active": true
+  },
+  {
+    "dv_entity_id": "SAT_CBS_JEUGDZORG", "dv_entity_type": "SATELLITE", "dv_zone": "RAW_VAULT",
+    "target_catalog": "contoso_vault_${env}", "target_schema": "raw_vault", "target_table": "sat_cbs_jeugdzorg",
+    "hash_key_column": "hk_cbs_jeugdzorg", "parent_entity_ids": ["HUB_CBS_JEUGDZORG"], "business_key_columns": null, "hashdiff_column": "hashdiff",
+    "is_multi_active": false, "multi_active_key": null, "record_source_expr": "'CBS.JEUGDZORG_WIJK_2025'", "load_order": 20, "is_active": true
+  },
+  {
     "dv_entity_id": "PIT_CUSTOMER", "dv_entity_type": "PIT", "dv_zone": "BUSINESS_VAULT",
     "target_catalog": "contoso_vault_${env}", "target_schema": "business_vault", "target_table": "pit_customer",
     "hash_key_column": "hk_customer", "parent_entity_ids": ["HUB_CUSTOMER", "SAT_CUSTOMER", "SAT_CUSTOMER_BV"],

@@ -27,6 +27,21 @@ TBLPROPERTIES (
   delta.enableChangeDataFeed = true
 );
 
+CREATE TABLE IF NOT EXISTS meta_source_connector (
+  source_object_id STRING NOT NULL,
+  connector_type STRING NOT NULL COMMENT 'HTTP_JSON | HTTP_CSV | JDBC | LAKEFLOW_CONNECT',
+  endpoint_url STRING NOT NULL,
+  response_format STRING NOT NULL DEFAULT 'JSON',
+  records_key STRING,
+  next_link_key STRING,
+  request_options MAP<STRING,STRING> COMMENT 'HTTP: timeout_seconds, max_retries, retry_delay_seconds, total_timeout_seconds',
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  CONSTRAINT pk_source_connector PRIMARY KEY (source_object_id) RELY
+)
+USING DELTA
+COMMENT 'Connectorinstellingen; credentials verwijzen uitsluitend naar Secrets of UC Connections.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
 -- -----------------------------------------------------------------------------
 -- 2. Bronobjecten + laadstrategie
 -- -----------------------------------------------------------------------------
@@ -48,6 +63,8 @@ CREATE TABLE IF NOT EXISTS meta_source_object (
                         COMMENT 'STRICT | ALLOW_NEW_COLUMNS_WITH_APPROVAL | RESCUE',
   owner_team            STRING    NOT NULL COMMENT 'Operationeel verantwoordelijke domeinteam',
   criticality           STRING    NOT NULL DEFAULT 'MEDIUM' COMMENT 'LOW | MEDIUM | HIGH',
+  processing_route      STRING    NOT NULL DEFAULT 'RAW_VAULT'
+                        COMMENT 'RAW_VAULT | REFERENCE_DATA',
 
   -- bronze doel
   bronze_catalog        STRING    NOT NULL,
@@ -69,6 +86,13 @@ CREATE TABLE IF NOT EXISTS meta_source_object (
   reject_catalog        STRING,
   reject_schema         STRING,
   reject_table          STRING,
+  quality_filter_expression STRING
+                        COMMENT 'Optionele Spark SQL-filter vóór Quality-projectie',
+
+  -- alleen voor processing_route = REFERENCE_DATA
+  reference_catalog     STRING,
+  reference_schema      STRING,
+  reference_table       STRING,
 
   load_order            INT       NOT NULL DEFAULT 100,
   is_active             BOOLEAN   NOT NULL DEFAULT true,
@@ -214,6 +238,8 @@ TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS meta_gold_entity (
   gold_entity_id        STRING  NOT NULL,
+  source_system_id      STRING  NOT NULL DEFAULT 'SALES'
+      COMMENT 'Bronsysteem of data product dat deze Gold-entiteit publiceert',
   gold_layer            STRING  NOT NULL COMMENT 'HISTORICAL | CURRENT',
   entity_type           STRING  NOT NULL COMMENT 'DIMENSION | FACT | AGGREGATE',
   target_catalog        STRING  NOT NULL,

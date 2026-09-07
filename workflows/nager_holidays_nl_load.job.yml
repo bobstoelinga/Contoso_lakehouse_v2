@@ -1,0 +1,26 @@
+resources:
+  jobs:
+    load_nager_holidays_nl:
+      name: "[${var.env}] Contoso - Load Nager Holidays NL"
+      description: "Extract -> Bronze -> Quality -> Reference Data -> Gold voor Nager.Date feestdagen."
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 4 ? * SUN#1"
+        timezone_id: Europe/Amsterdam
+        pause_status: ${var.pull_schedule_pause_status}
+      parameters:
+        - name: delivery_date
+          default: ""
+      tasks:
+        - task_key: extract_nager
+          run_job_task:
+            job_id: ${resources.jobs.extract_public_api.id}
+            job_parameters:
+              source_object_id: NAGER.HOLIDAYS_NL
+              delivery_date: "{{job.parameters.delivery_date}}"
+        - task_key: load_nager_to_gold
+          depends_on: [{ task_key: extract_nager }]
+          run_job_task:
+            job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
+            job_parameters:
+              source_system_id: NAGER

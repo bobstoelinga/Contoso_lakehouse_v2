@@ -110,6 +110,56 @@ TBLPROPERTIES (
 );
 
 -- -----------------------------------------------------------------------------
+-- 2a. Referentietabellen voor governance en beheer
+-- -----------------------------------------------------------------------------
+
+-- Gedenormaliseerde retry- en prioriteitsconfiguratie, één bron van waarheid
+-- voor meta_dependency en andere herhaalbare faalscenario's.
+CREATE TABLE IF NOT EXISTS meta_retry_policy (
+  retry_policy_id     STRING NOT NULL COMMENT 'bv. STANDARD, CRITICAL, NO_RETRY',
+  max_retries         INT    NOT NULL DEFAULT 3,
+  backoff_type        STRING NOT NULL DEFAULT 'EXPONENTIAL_BACKOFF'
+                      COMMENT 'EXPONENTIAL_BACKOFF | FIXED_DELAY | NONE',
+  initial_delay_sec   INT    NOT NULL DEFAULT 60,
+  max_delay_sec       INT    NOT NULL DEFAULT 3600,
+  priority            INT    NOT NULL DEFAULT 100 COMMENT 'Lagere waarde = eerder gepland',
+  description         STRING,
+  is_active           BOOLEAN NOT NULL DEFAULT true,
+  CONSTRAINT pk_retry_policy PRIMARY KEY (retry_policy_id) RELY
+)
+USING DELTA
+COMMENT 'Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in meta_dependency.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
+-- Formele goedkeuringsregistratie voor schema-drift, zodat de policy
+-- ALLOW_NEW_COLUMNS_WITH_APPROVAL afdwingbaar wordt in plaats van declaratief.
+CREATE TABLE IF NOT EXISTS meta_schema_drift_approval (
+  approval_id         STRING    NOT NULL COMMENT 'Unieke sleutel, bv. SDA-2026-0001',
+  source_object_id    STRING    NOT NULL,
+  from_schema_version STRING    COMMENT 'Contractversie vóór drift',
+  to_schema_version   STRING    COMMENT 'Contractversie ná drift',
+  detected_columns    ARRAY<STRING> COMMENT 'Nieuwe of gewijzigde kolommen',
+  drift_type          STRING    NOT NULL COMMENT 'ADD_COLUMN | RENAME | DROP | TYPE_CHANGE',
+  status              STRING    NOT NULL DEFAULT 'PENDING'
+                      COMMENT 'PENDING | APPROVED | REJECTED | APPLIED',
+  requested_by        STRING    NOT NULL DEFAULT current_user(),
+  requested_at        TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+  approved_by         STRING,
+  approved_at         TIMESTAMP,
+  applied_at          TIMESTAMP,
+  notes               STRING,
+  CONSTRAINT pk_schema_drift_approval PRIMARY KEY (approval_id) RELY,
+  CONSTRAINT fk_sda_object FOREIGN KEY (source_object_id)
+    REFERENCES meta_source_object(source_object_id) RELY
+)
+USING DELTA
+COMMENT 'Goedkeuringsworkflow voor schema-drift per bronobject.'
+TBLPROPERTIES (
+  'delta.feature.allowColumnDefaults' = 'supported',
+  delta.enableChangeDataFeed = true
+);
+
+-- -----------------------------------------------------------------------------
 -- 3. Afhankelijkheden (nooit hardcoded in code of workflow)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS meta_dependency (
@@ -249,7 +299,7 @@ CREATE TABLE IF NOT EXISTS meta_gold_entity (
   business_key_columns  ARRAY<STRING> NOT NULL,
   scd_type              STRING  NOT NULL COMMENT 'SCD1 | SCD2 | SNAPSHOT',
   partition_columns     ARRAY<STRING>,
-  zorder_columns        ARRAY<STRING>,
+  cluster_columns       ARRAY<STRING> COMMENT 'Liquid clustering keys; vervangt ZORDER',
   depends_on_gold_entity_ids ARRAY<STRING>,
   publish_mode          STRING  NOT NULL DEFAULT 'ATOMIC_SWAP'
       COMMENT 'ATOMIC_SWAP (view-pointer) | MERGE | OVERWRITE',

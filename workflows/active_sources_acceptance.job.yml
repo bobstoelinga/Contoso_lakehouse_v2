@@ -1,0 +1,89 @@
+# Eenmalige acceptatiejob: genereer een testwaardige Sales-levering, laad alle
+# actieve bronnen en faal als een bron niet zichtbaar wordt in Gold Actueel.
+resources:
+  jobs:
+    active_sources_acceptance:
+      name: "[${var.env}] Contoso - Active Sources Acceptance"
+      description: >-
+        Genereert Sales-testdata, laadt SALES, CBS, ECB, NAGER en FABRIC_SALES
+        en controleert daarna of alle actieve bronnen doorkomen in Gold.
+      max_concurrent_runs: 1
+      timeout_seconds: 21600
+
+      parameters:
+        - name: delivery_date
+          default: ${var.integration_delivery_date}
+        - name: business_date
+          default: "2024-09-02"
+        - name: customer_count
+          default: "10000"
+        - name: product_count
+          default: "5000"
+        - name: employee_count
+          default: "1000"
+        - name: order_count
+          default: "100000"
+        - name: return_count
+          default: "2000"
+
+      tasks:
+        - task_key: generate_sales_delivery
+          notebook_task:
+            notebook_path: ../notebooks/02_generate_stress_delivery.py
+            base_parameters:
+              env: ${var.env}
+              delivery_date: "{{job.parameters.delivery_date}}"
+              business_date: "{{job.parameters.business_date}}"
+              customer_count: "{{job.parameters.customer_count}}"
+              product_count: "{{job.parameters.product_count}}"
+              employee_count: "{{job.parameters.employee_count}}"
+              order_count: "{{job.parameters.order_count}}"
+              return_count: "{{job.parameters.return_count}}"
+              change_set: "0"
+
+        - task_key: load_sales_to_gold
+          depends_on: [{ task_key: generate_sales_delivery }]
+          run_job_task:
+            job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
+            job_parameters:
+              source_system_id: SALES
+
+        - task_key: load_fabric_sales_to_gold
+          depends_on: [{ task_key: generate_sales_delivery }]
+          run_job_task:
+            job_id: ${resources.jobs.load_fabric_sales_order_lines.id}
+            job_parameters:
+              delivery_date: "{{job.parameters.delivery_date}}"
+
+        - task_key: load_ecb_to_gold
+          run_job_task:
+            job_id: ${resources.jobs.load_ecb_exchange_rates.id}
+            job_parameters:
+              delivery_date: "{{job.parameters.delivery_date}}"
+
+        - task_key: load_cbs_to_gold
+          depends_on: [{ task_key: load_ecb_to_gold }]
+          run_job_task:
+            job_id: ${resources.jobs.load_cbs_jeugdzorg_wijk.id}
+            job_parameters:
+              delivery_date: "{{job.parameters.delivery_date}}"
+
+        - task_key: load_nager_to_gold
+          depends_on: [{ task_key: load_ecb_to_gold }]
+          run_job_task:
+            job_id: ${resources.jobs.load_nager_holidays_nl.id}
+            job_parameters:
+              delivery_date: "{{job.parameters.delivery_date}}"
+
+        - task_key: monitor_active_sources_gold
+          depends_on:
+            - task_key: load_sales_to_gold
+            - task_key: load_fabric_sales_to_gold
+            - task_key: load_cbs_to_gold
+            - task_key: load_nager_to_gold
+          notebook_task:
+            notebook_path: ../notebooks/42_monitor_active_source_gold.py
+            base_parameters:
+              env: ${var.env}
+              expected_delivery_date: "{{job.parameters.delivery_date}}"
+              repo_root: ${workspace.file_path}

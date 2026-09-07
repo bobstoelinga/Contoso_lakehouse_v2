@@ -4,6 +4,10 @@ resources:
       name: "[${var.env}] Contoso - Load Fabric Sales Order Lines"
       description: "Fabric SQL extract -> Bronze -> Quality -> Reference Data -> Gold."
       max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: Europe/Amsterdam
+        pause_status: ${var.pull_schedule_pause_status}
       parameters:
         - name: delivery_date
           default: ""

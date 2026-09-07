@@ -47,6 +47,25 @@ trigger:
 Auto Loader start Bronze zodra er bestanden binnenkomen. `wait_after_last_change`
 voorkomt dat de run start terwijl het bronsysteem nog bezig is met uploaden.
 
+## Planning van pull-bronnen
+
+Pull-bronnen worden niet via `file_arrival` gescheduled, omdat de levering pas
+ontstaat nadat Databricks de bron actief heeft opgehaald. Daarom heeft iedere
+pull-bron een zelfstandige end-to-end laadjob met twee stappen: eerst extract
+naar Landing, daarna de generieke pipeline met de juiste `source_system_id`.
+
+De periodieke schedules staan op deze laadjobs, niet op de generieke extractjob
+en niet op de generieke pipeline. Zo blijft retry, alerting, audit en
+end-to-end lineage per bron zichtbaar. In `dev` blijven de schedules gepauzeerd;
+in `tst` en `prd` worden ze via `pull_schedule_pause_status` geactiveerd.
+
+| Bron | Job | Planning |
+|---|---|---|
+| `CBS` | `load_cbs_jeugdzorg_wijk` | Wekelijks zondag 05:00 Europe/Amsterdam |
+| `ECB` | `load_ecb_exchange_rates` | Werkdagen 17:30 Europe/Amsterdam |
+| `NAGER` | `load_nager_holidays_nl` | Eerste zondag van de maand 04:00 Europe/Amsterdam |
+| `FABRIC_SALES` | `load_fabric_sales_order_lines` | Dagelijks 02:00 Europe/Amsterdam |
+
 ## Publieke API-extracten
 
 CBS StatLine, ECB-wisselkoersen en Nager-vakantiedagen lopen via dezelfde
@@ -118,6 +137,10 @@ actief.
 |---|---|---|
 | `setup_lakehouse` | Handmatig / bij deploy | DDL uitvoeren, metadata seeden, model valideren |
 | `contoso_lakehouse_pipeline` | File arrival | End-to-end verwerking van een levering |
+| `load_cbs_jeugdzorg_wijk` | Schedule | Pull CBS naar Landing en start daarna de pipeline |
+| `load_ecb_exchange_rates` | Schedule | Pull ECB naar Landing en start daarna de pipeline |
+| `load_nager_holidays_nl` | Schedule | Pull Nager naar Landing en start daarna de pipeline |
+| `load_fabric_sales_order_lines` | Schedule | Pull Fabric SQL naar Landing en start daarna de pipeline |
 | `lakehouse_maintenance` | Zondag 03:00 | `OPTIMIZE`, `VACUUM`, opruimen van verlopen Gold-slots |
 
 ## Schalen naar tientallen bronsystemen

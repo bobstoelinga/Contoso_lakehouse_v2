@@ -1,468 +1,276 @@
-# Projectverslag — Contoso Lakehouse v2
+# Eindverslag - Contoso Lakehouse v2
 
-**Versie:** 1.0  
-**Datum:** 3 september 2026  
-**Status:** conceptueel ontwerp en dev-validatie  
-**Repository:** `Contoso_lakehouse_v2`  
-**Branch:** `main`  
-**Laatste commit:** `a1e4f5e`
+**Versie:** 2.0  
+**Datum:** 7 september 2026  
+**Status:** afgerond prototype, gevalideerd in `dev`  
+**Technologie:** Azure Databricks, Unity Catalog, Delta Lake, Databricks Workflows en Microsoft Fabric SQL Database als bron
 
 ## 1. Managementsamenvatting
 
-Dit project ontwikkelde een conceptuele, metadata-gedreven ETL-oplossing voor Contoso Sales op Databricks. Het ontwerp gebruikt Unity Catalog, Delta Lake, Auto Loader, Quality/Reject, Data Vault 2.0 en historische en actuele Gold-datamarts.
+Dit project realiseert een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-ontwerpprincipes**. Het prototype verwerkt bestandsleveringen en externe pull-bronnen via Landing Volume, Bronze, Quality/Reject, Data Vault of Reference Data, historisch Gold en actueel Gold.
 
-De oplossing is technisch substantieel uitgewerkt en meerdere end-to-end paden zijn in een dev-omgeving gevalideerd. Belangrijke ontwerpcontroles zijn aanwezig: een delivery-gate, chronologische verwerking, schema-driftbeleid, idempotente loads, metadata-validatie, audit-events en atomische publicatie van actuele Gold-data.
+De runtime en governance-laag zijn Azure Databricks, Unity Catalog en Delta Lake. Microsoft Fabric is aangesloten als werkende SQL-bron: een Fabric SQL Database wordt met JDBC uitgelezen, schrijft een immutable Parquet-levering naar het Databricks Landing Volume en wordt vervolgens door dezelfde metadata-gedreven keten verwerkt. Dit is dus geen native Fabric Lakehouse-implementatie.
 
-**Productieadvies:** nog niet productieklaar. De basis is geschikt voor verdere hardening en een gecontroleerde testomgeving, maar productieacceptatie moet wachten op een volledige positieve stresstest, de negatieve proeven, bewezen SCD2/delete-verwerking, operationalisering van governance en formele security-, SLA-, recovery- en kostencontroles.
+De kernketen en de belangrijkste foutscenario's zijn in `dev` bewezen. De Fabric Sales-delivery `FABRIC_SALES|2026-09-06` doorliep succesvol Bronze, delivery-gate, Quality, Reference Data, Gold Historisch en Gold Actueel. Een onafhankelijke read-only controle telde 542 rijen in elk van deze lagen. De lokale regressiesuite eindigde met **98 geslaagde tests**.
 
-## 2. Projectomschrijving
+De oplossing is geschikt als gevalideerd architectuurprototype en als basis voor een gecontroleerde testomgeving. Productieacceptatie vereist nog bewijzen voor volume, recovery, beveiliging, governance, kosten en operationeel beheer.
 
-Het doel was een generiek ETL-framework te ontwerpen waarbij nieuwe bronobjecten zoveel mogelijk via metadata worden toegevoegd, zonder nieuwe notebooks of workflowlogica te schrijven.
+## 2. Aanleiding en doelstelling
 
-De oorspronkelijke vraag beschreef de volgende keten:
+De opdracht was een metadata-gedreven Lakehouse-oplossing te ontwerpen met de lagen Volume, Brons, Quality, Data Vault, Historische Datamart en Actuele Datamart. Orders, Customers en Products vormen samen een levering. Vervolgverwerking mag pas starten wanneer alle verplichte objecten voor dezelfde ontvangstdatum succesvol zijn geladen.
 
-`Volume -> Bronze -> Quality/Reject -> Data Vault -> Gold Historisch -> Gold Actueel`
-
-Orders, Customers en Products komen uit een bron systeem. Bestanden worden per bron en ontvangstdatum aangeleverd. Auto Loader verwerkt de bestanden incrementeel naar Bronze. Vervolgverwerking mag pas starten wanneer alle verplichte objecten van dezelfde levering beschikbaar en succesvol geladen zijn.
-
-## 3. Requirements
-
-### Functionele requirements
-
-- Bestanden per bron en datumfolder ontvangen.
-- Auto Loader incrementeel vanuit Volume naar Bronze laten lezen.
-- Nieuwe bronkolommen gecontroleerd kunnen verwerken via schema evolution.
-- Een delivery-gate afdwingen voor alle verplichte objecten van dezelfde levering.
-- Metadata gebruiken voor bronobjecten, mappings, kwaliteitsregels, afhankelijkheden en Data Vault-mappings.
-- Kwaliteitsfouten vastleggen in Reject met reden en originele payload.
-- Gevalideerde gegevens naar Raw Vault en Business Vault laden.
-- Historische Gold-datamarts met SCD2-historie bouwen.
-- Actuele Gold-datamarts alleen na een volledig succesvolle business load publiceren.
-- Bij een fout de vorige actuele Gold-release actief houden.
-- Runs, statussen, fouten, row counts en metadata-versies auditen.
-
-### Niet-functionele requirements
-
-- Schaalbaar naar tientallen bronsystemen en honderden tabellen.
-- Idempotent herstarten na fouten.
-- Geen hardcoded entiteitsafhankelijkheden in workflows.
-- Herleidbaarheid naar levering, batch, bronbestand en metadatarelease.
-- Beheersbare Delta-performance zonder handmatig partitiebeheer.
-- Scheiding van omgevingen, rollen en consumerrechten.
-
-## 4. Opgeleverde architectuur
-
-### Lagen
-
-- **Landing/Volume:** external volume op ADLS Gen2 met datumfolders.
-- **Bronze:** 1-op-1 brondata met technische metadata, Auto Loader en checkpoints.
-- **Quality:** getypeerde en gevalideerde records volgens metadata.
-- **Reject:** afgekeurde records, alle faalredenen en originele JSON-payload.
-- **Raw Vault:** hubs, links en insert-only satellites.
-- **Business Vault:** afgeleide satellites en PIT-ondersteuning.
-- **Gold Historisch:** dimensioneel model met volledige historie.
-- **Gold Actueel:** publieke views op fysieke v1/v2-slots met een groepsreleasepointer.
-- **Metadata/Audit:** configuratie, afhankelijkheden, DQ-resultaten, runs, deliveries en publicaties.
-
-### Belangrijkste ontwerpbesluiten
-
-- Auto Loader detecteert bestanden; `foreachBatch` verwerkt per delivery en chronologisch.
-- Een delivery krijgt een volgnummer; een latere delivery wacht op de oudste nog niet afgehandelde delivery.
-- Satellites zijn fysiek insert-only; `load_end_date` en `is_current` worden via views bepaald.
-- SHA-256, normalisatie, null-token, separator en conventieversie zijn centraal vastgelegd.
-- Multi-source hubs gebruiken een collision code.
-- Kwaliteitsregels worden in een gecombineerde evaluatiepass verwerkt.
-- Schema drift faalt bewust onder het ingestbeleid en wordt geaudit.
-- Metadataexpressies worden vooraf met `EXPLAIN` gevalideerd.
-- Bronze gebruikt begrensde Serverless fan-out; auditstatussen zijn append-only events.
-- Gold Actueel publiceert per publication group via een atomische releasepointer.
-- Elke run verwijst naar een deterministische metadatarelease.
-- Onderhoud, OPTIMIZE, VACUUM en freshness-monitoring zijn als ontwerpcomponent opgenomen.
-- Bronobjecten kiezen expliciet tussen `RAW_VAULT` en `REFERENCE_DATA`; de laatste
-	route schrijft na Quality een versioned referentietabel in Business Vault.
-
-## 5. Implementatie-overzicht
-
-| Onderdeel | Implementatie |
-|---|---|
-| Bundle en omgevingen | `databricks.yml`, targets voor dev/tst/prd |
-| Catalogs, schemas, volumes, grants | `sql/00_unity_catalog` |
-| Metadata model | `sql/01_metadata/10_metadata_model.sql` |
-| Audit model en gates | `sql/01_metadata/11_audit_model.sql` |
-| Metadata migraties | `sql/01_metadata/12_metadata_migrations.sql` |
-| Monitoring | `sql/01_metadata/13_monitoring_queries.sql` |
-| Seed metadata | `metadata/seed` |
-| Python framework | `src/contoso_lakehouse` |
-| Databricks notebooks | `notebooks` |
-| Jobs | `workflows` |
-| Lokale regressietests | `tests/test_metadata_consistency.py` |
-
-## 6. Mijlpalen en resultaten
-
-1. Eerste architectuur ontworpen voor Volume, Bronze, Quality, Reject, Vault en Gold.
-2. Kritische review uitgevoerd op schaalbaarheid, afhankelijkheden, performance, schema evolution en actuele marts.
-3. P0/P1-bevindingen verwerkt in metadata, SQL, Python en workflows.
-4. Unity Catalog external location, file-arrival-trigger en DDL-uitvoering hersteld en gevalideerd.
-5. Serverless-onverenigbare sessieconfiguratie vervangen door schema evolution op de MERGE-operatie.
-6. Bronze-fan-out en append-only audit-events toegevoegd.
-7. Gold Actueel gewijzigd naar atomische publication groups.
-8. Metadatarelease-fingerprint aan audit toegevoegd.
-9. Delivery-gate en remediation voor geblokkeerde demo-leveringen gevalideerd.
-10. Een volledige delivery op 9 september en een tweede op 10 september doorliepen metadata, Bronze, gate, Quality, Raw Vault, Business Vault, Gold Historisch en Gold Actueel.
-11. Een stresstestdelivery met 100.000 Customers, 50.000 Products, 10.000 Employees, 1.000.000 Orders en 20.000 Returns is gegenereerd in 140 Parquet-bestanden.
-12. De lokale regressiesuite is uitgebreid naar 69 geslaagde tests.
-13. De publieke connectoren CBS StatLine, ECB en Nager.Date zijn gehard met
-	metadata-gestuurde request- en totale object-timeouts, exponential backoff,
-	task-timeouts, staging-cleanup en `LANDING`-audit-events. Een mislukte
-	extractie publiceert geen delivery naar het landingvolume en kan Auto Loader
-	daarom niet activeren.
-14. ECB-wisselkoersen en Nager-vakantiedagen zijn als zelfstandige Gold
-    referentieproducten toegevoegd. Beide behouden historie vanuit Business
-    Vault en publiceren een actuele dimensie atomisch per brongebonden
-    publication group; CBS blijft een zelfstandig Raw-Vault-feitenproduct.
-15. Op 4 september is de CBS StatLine-extractie voor delivery `CBS|2026-09-05`
-	succesvol naar Landing gepubliceerd. De eerste daaropvolgende Bronze-run
-	faalde omdat de DDL voor `raw_dev.cbs` wel het landingvolume maar niet het
-	vereiste interne `checkpoints`-volume aanmaakte. De DDL is uitgebreid met
-	idempotente `checkpoints`- en `quarantine`-volumes voor CBS, ECB en Nager;
-	de herstel-setup is daarna succesvol afgerond. De CBS-pipeline moet nu
-	opnieuw vanaf Bronze worden uitgevoerd en volledig worden geverifieerd.
-16. De herstart van de CBS-pipeline bereikte Quality en bewees daarmee dat
-	Bronze na de volumeherstelactie functioneert. Quality faalde vervolgens
-	bij het schrijven van Rejects: de business key gebruikte de ruwe CBS-namen
-	`Vormen`, `Wijken` en `Perioden`, terwijl de Quality-projectie alleen de
-	gemapte doelkolommen bevat. Reject-business-keys worden nu afgeleid uit de
-	als business key gemarkeerde `QUALITY`-mappings; de gerichte lokale
-	regressies zijn succesvol met 79 tests. De gewijzigde pipeline moet nog
-	opnieuw naar dev worden gedeployed en end-to-end worden uitgevoerd.
-17. De gecorrigeerde bundle is gevalideerd en naar dev gedeployed. De volledige
-	CBS-pipeline eindigde op 4 september succesvol: metadata-validatie, Bronze,
-	delivery-gate, Quality, Raw Vault, Business Vault, Gold Historisch en Gold
-	Actueel zijn uitgevoerd. De gate verwerkte chronologisch de oudste
-	beschikbare delivery `CBS|2026-09-04`; de succesvol geëxtraheerde delivery
-	`CBS|2026-09-05` wacht als volgende op verwerking.
-
-## 7. Testplan en uitgevoerde tests
-
-### Lokale tests
-
-Uitgevoerd:
+Het doel was een herbruikbaar framework, niet een eenmalige Sales-pipeline: nieuwe bronobjecten moeten zo veel mogelijk met metadata worden toegevoegd, zonder nieuwe notebooks of workflowlogica te bouwen.
 
 ```text
-python -m pytest -q
-92 passed
+Bronbestand, API of Fabric SQL
+  -> immutable Landing Volume
+  -> Bronze
+  -> metadata-gestuurde delivery-gate
+  -> Quality / Reject
+  -> Raw Vault of Reference Data
+  -> Business Vault
+  -> Gold Historisch
+  -> Gold Actueel
 ```
 
-De tests controleren onder meer hash-conventies, veilige identifiers, placeholder-resolutie, DQ-thresholds, parallelle execution waves, cyclusdetectie, audit-fouten, reject-clearing, schema-driftbeleid, Gold-publicatievoorwaarden, seed-versies en metadata-contracten.
+## 3. Scope en afbakening
 
-### End-to-end dev-validatie
+### Binnen scope
 
-Bewezen:
+- Metadata voor systemen, objecten, connectors, mappings, afhankelijkheden, kwaliteitsregels, Data Vault en Gold.
+- Landing via Unity Catalog Volumes en incrementele Bronze-ingest via Auto Loader, checkpoints en Delta Lake.
+- Quality-controles, traceerbare rejects en auditeerbare deliveries en runs.
+- Data Vault 2.0-principes voor historiserende Sales- en CBS-data.
+- De expliciete `REFERENCE_DATA`-route voor ECB, Nager en Fabric Sales.
+- Historische en actuele Gold-datamarts met atomische publicatie.
+- Pull-extracten voor CBS, ECB, Nager en Fabric SQL; file-arrival voor Sales.
 
-- Metadata-validatie vóór verwerking.
-- Bronze-fan-out met vijf objecten.
-- Delivery-gate.
-- Quality-blokkade bij ongeldige data.
-- Geen Vault- of Gold-verwerking na Quality-falen.
-- Raw Vault, Business Vault, Gold Historisch en Gold Actueel bij valide deliveries.
-- Atomische `SALES_MART`-publicatie.
-- Behoud van de vorige Current Gold-release bij een mislukte build.
-- Gecontroleerd superseden met reden, goedkeurder en referentie.
-- Registratie van technische fouten en herstelacties.
-- Per bronobject een expliciete verwerkingsroute: `RAW_VAULT` of `REFERENCE_DATA`.
-- `REFERENCE_DATA` gaat na Quality naar een versioned referentietabel in Business Vault;
-	bestaande objecten behouden door de standaardwaarde hun `RAW_VAULT`-route.
-- CBS StatLine-tabel `86204NED` beoordeeld als historisch feitenobject en daarmee
-	aangewezen voor `RAW_VAULT`, niet voor de referentieroute.
-- Gold Historisch en Gold Actueel zijn per `source_system_id` gefilterd; een
-	CBS-delivery kan daardoor geen `SALES_MART`-entiteiten bouwen of publiceren.
+### Buiten scope
 
-### Nog uit te voeren of niet geaccepteerd
+- Native Fabric Lakehouse-, Fabric Data Factory- of Fabric Notebook-runtime.
+- Formele productie-SLA's, RPO/RTO-bewijs, 24x7-on-call en volledige FinOps.
+- Business-mastering en semantische multi-source integratie.
+- Een generieke CDC-implementatie voor alle connectoren.
 
-- Tien opeenvolgende productierepresentatieve deliveries.
-- Positieve `change_set=1`-verwerking met aantoonbare wijzigingen en deletes.
-- Controle van SCD2, hashdiffs, delete-status en actuele Gold na die wijzigingen.
-- Incomplete delivery en later arriverend bestand.
-- Chronologie met N+1 gereed terwijl N onvolledig is.
-- DQ- en reject-herverwerking.
-- Nieuwe niet-gemapte kolom en typewijziging.
-- Herstart op elk belangrijk breekpunt.
-- Gold-buildfout met bewijs dat alle publieke views de oude groep blijven tonen.
-- Fan-out en audit-concurrency op enterprise-schaal.
-- Performance-, SLA- en kostenmeting op representatieve productievolumes.
+## 4. Requirements en realisatie
 
-### Cross-source integratierisico's
-
-De routekeuze per bronobject voorkomt niet automatisch dat data uit meerdere
-bronnen inhoudelijk veilig gecombineerd wordt. Voor CBS en toekomstige
-bronsystemen gelden daarom de volgende voorwaarden:
-
-- Een `delivery_id` is uitsluitend binnen één bronsysteem betekenisvol.
-	Gebruik geen `SAME_DELIVERY`-afhankelijkheid tussen bijvoorbeeld `SALES` en
-	`CBS`; leg in plaats daarvan een expliciet freshness- of versiecontract vast.
-- Een Gold-mart die bronnen combineert moet een eigen data-product en
-	publicatiegroep krijgen. Publiceer pas wanneer alle benoemde bronversies
-	beschikbaar zijn; combineer nooit een nieuwe Sales-delivery stilzwijgend met
-	een willekeurige actuele CBS-versie.
-- De Raw-Vault collision code bevat het bronsysteem. Dezelfde natuurlijke sleutel
-	uit twee systemen vormt daardoor bewust twee hubs. Integratie vereist een
-	expliciete matching-, mastering- of same-as-regel in Business Vault.
-- Een Data Vault-entiteit met mappings uit meerdere bronsystemen wordt niet door
-	de brongebonden planner geladen. Multi-source integratie vereist een afzonderlijke
-	integratierun na de bronloads, met expliciete afhankelijkheden en testgevallen.
-- Een reference-load sluit momenteel geen sleutels af die in een volledige nieuwe
-	snapshot ontbreken. Voeg vóór gebruik van `SNAPSHOT_SCD2` voor referentiedata
-	een snapshot-compleetheidscontract en ontbrekende-sleutelafhandeling toe.
-- CBS `86204NED` is een jaartabel; een nieuw jaar kan een nieuwe StatLine-tabelcode
-	krijgen. Houd daarom het logische data product stabiel, maar versieer de fysieke
-	datasetcode, het kolomcontract en de comparability/trend-break metadata.
-
-### Aanbevolen vervolgaanpak voor CBS
-
-1. **Bouw eerst een zelfstandig CBS-data product.** Onboard `86204NED` als
-	`CBS_JEUGDZORG_MART` met een eigen Landing-volume, OData-extract, Bronze- en
-	Quality-contract, Raw Vault, historische Gold-tabel en eigen publicatiegroep.
-	Gebruik een volledige, immutable extract per publicatiemoment omdat CBS cijfers
-	achteraf reviseert.
-2. **Beheer het statistiekcontract expliciet.** Leg naast de datasetcode de
-	CBS-publicatie- en extracttijd, cijferstatus (voorlopig/nader voorlopig/definitief),
-	maatregel, peilperiode en eventuele trendbreuk vast. Een jaarlijkse nieuwe
-	StatLine-code wordt zo een nieuwe bronversie van hetzelfde logische product.
-3. **Voeg geen Sales-CBS-join toe zonder businessvraag.** `86204NED` en de
-	Contoso Sales-case hebben geen natuurlijke gemeenschappelijke bedrijfsentiteit.
-	Een technische join op gemeente is geen voldoende reden voor een gecombineerd
-	data product.
-4. **Maak cross-source integratie pas daarna expliciet.** Alleen wanneer een
-	concrete analysevraag een combinatie vereist, definieer je een nieuw data
-	product met een eigen integratierun, matchingregels, freshness-SLA en een
-	releasecontract waarin de gekozen Sales- en CBS-versies zijn vastgezet.
-
-### Aanbevolen externe bron voor de Sales-case: ECB-wisselkoersen
-
-De ECB Data API is een geschiktere eerste externe bron voor een echte
-Sales-verrijking dan CBS `86204NED`. De bestaande order- en retourdata bevatten
-al `currency_code` en geldbedragen. Dagelijkse ECB-referentiekoersen kunnen
-daarom tijdsafhankelijk aan `order_date`, `ship_date` of `return_date` worden
-gekoppeld.
-
-- Configureer de bron als `REFERENCE_DATA`, bijvoorbeeld `ECB.EXCHANGE_RATE`.
-	De API levert SDMX-data; per reeks is de koers gekoppeld aan valuta en
-	observatiedatum.
-- Bewaar in Landing en Quality minimaal `currency_code`, `rate_date`,
-	`rate_to_eur`, bronreeks, publicatietijd en extracttijd. De ECB-reeks
-	`EXR/D.USD.EUR.SP00.A` is bijvoorbeeld een dagelijkse USD-koers ten opzichte
-	van EUR; de conversierichting moet als metadata worden vastgelegd.
-- Laad de reeks als versioned referentiedata naar Business Vault. Verrijk
-	orderregels in een computed satellite met de laatst bekende koers op of vóór
-	de transactiedatum. Op niet-publicatiedagen, zoals weekenden en feestdagen,
-	bestaat immers niet altijd een nieuwe koers.
-- Leg vooraf de boekhoudkundige regel vast: een historische omzetkoers wordt
-	doorgaans bij verwerking vastgezet; een latere ECB-correctie leidt alleen na
-	expliciete goedkeuring tot een herwaardering. Zonder die regel kunnen eerdere
-	Gold-totalen ongemerkt wijzigen.
-
-### Deploymentstatus externe bronnen
-
-Op 4 september 2026 is de Databricks Asset Bundle met het OAuth-profiel
-`databricks_oauth` succesvol gevalideerd en naar `dev` gedeployed. De Gold
-historietabellen en Current-views voor CBS, ECB en Nager zijn in Unity Catalog
-aanwezig. Een eerste CBS-extractie faalde voordat netwerkverkeer plaatsvond,
-omdat de notebook `request_options` las zonder deze kolom in zijn configuratie-
-SELECT op te nemen. Dit is hersteld en gedekt met een metadatacontracttest.
-
-Voor bestaande omgevingen is `request_options` bovendien opgenomen in de
-idempotente schema-aware setupmigratie. De herstel-setup is gestart om de
-ontbrekende kolom, indien van toepassing, toe te voegen, de seedmetadata te
-laden en de metadata opnieuw te valideren. De oude CBS-, ECB-, Nager- en
-validatieruns zijn gecontroleerd geannuleerd om geen verouderde metadata naast
-de herstelrun te gebruiken. Ten tijde van dit verslag wacht de herstel-setup
-nog op voltooiing; de volledige lokale regressiesuite is groen met 92 tests.
-
-Op 5 september 2026 is Nager.Date voor delivery `NAGER|2026-09-05` succesvol
-geextraheerd naar `/Volumes/raw_dev/nager/landing/2026-09-05/holidays_nl`.
-Het immutable manifest bevat 11 records en de levering bevat alle verwachte
-JSON-bestanden plus `_SUCCESS`. Een handmatige herhaalrun eindigde op de
-bestaande delivery-check; dat is inhoudelijk correct om overschrijven te
-voorkomen, maar de job markeert de run daardoor nog als `FAILED`. De workflow
-is daarom gedeployed met een lege datumdefault, zodat een run zonder expliciete
-datum de actuele UTC-datum gebruikt. Open actie: een bestaande complete
-delivery moet in de extractor als idempotent succes worden geregistreerd.
-
-Deze open actie is op 5 september 2026 opgelost. De publieke extractor
-controleert nu het immutable manifest: een bestaande, complete delivery eindigt
-als succesvolle no-op (`EXISTS`) en een bestaande folder zonder manifest faalt
-als onvolledig. Daardoor start een herhaalrun veilig de brongebonden keten naar
-Gold zonder Landing-data te overschrijven.
-
-Op 5 september 2026 is de ECB Quality-filter aangescherpt naar
-`try_cast(OBS_VALUE AS decimal(18,8)) IS NOT NULL`. SDMX gebruikt lege of
-niet-castbare observaties voor momenten zonder gepubliceerde koers; die zijn
-geen koersrecords en worden daarom voor de Quality-projectie uitgesloten. De
-regel `ecb_rate_positive` behoudt een harde drempel van 0 procent voor de
-overblijvende koersrecords: nul- en negatieve waarden falen de batch nog steeds.
-De metadatawijziging is gedekt met een gerichte regressietest.
-
-Op 5 september 2026 zijn ECB, CBS en Nager als drie afzonderlijke end-to-end
-laadprocessen ingericht. Elke bron heeft een eigen Databricks-job met een
-eigen deliverydatum, immutable Landing-extract en brongebonden vervolgketen
-naar Gold. De jobs starten achtereenvolgens de gedeelde extractjob met een vast
-bronobject en de pipeline met het bijbehorende bronsysteem. Daardoor kunnen
-planning, retries, audit en foutafhandeling per extern data-product worden
-beheerd zonder dat een bron een ander data-product publiceert.
-
-Op 5 september 2026 is vastgesteld dat de oorspronkelijke ECB-SDMX-CSV meer
-kolommen bevat dan het Quality-contract. Bronze comprimeerde die onbekende
-kolommen bij `RESCUE` ten onrechte naar `_rescued_data` en verwijderde ze uit
-de fysieke Bronzelaag. Dit is aangepast: Bronze bewaart alle bronkolommen met
-schema evolution en technische lineagekolommen. De Quality-laag bepaalt daarna
-via mappings welke velden onderdeel zijn van het gevalideerde datacontract.
-
-Op 5 september 2026 is `ECB|2026-09-05` aantoonbaar end-to-end verwerkt. De
-zelfstandige ECB-job en alle onderliggende taken zijn succesvol: extract,
-Bronze, delivery gate, Quality, Reference Data, Gold Historisch en Gold
-Actueel. De 2.417 lege SDMX-observaties worden door de geactiveerde
-`quality_filter_expression` vóór de Quality-projectie uitgesloten; valide
-koersrecords zijn naar de versioned referentietabel en de Gold-publicatie
-verwerkt.
-
-Op 5 september 2026 is de daadwerkelijke Gold-output in dev gecontroleerd.
-Alle actieve Gold-entiteiten voor Sales, CBS, ECB en Nager bevatten rijen in
-hun historische tabel en hebben voor de actuele laag een actieve publicatie.
-De vier SharePoint-Gold-entiteiten hebben bewust nog geen output, omdat de
-SharePoint-bronobjecten in metadata inactief staan.
-
-Op 6 september 2026 is in de Fabric SQL-database `Contoso_database` de
-bronview `SalesLT.vw_databricks_sales_order_line` ingericht. De view levert
-een expliciet orderregelcontract met één rij per `SalesOrderDetailID`, een
-deterministische productbeschrijving en `source_last_modified_at` als
-extract-watermark. Direct identificeerbare contact- en adresgegevens zijn
-voorlopig niet opgenomen. Voor de extractie is in Entra-tenant
-`4kjwn2.onmicrosoft.com` (tenant-ID `f9350d85-6f0e-42fd-8385-a59c2f09ec1a`)
-de single-tenant service principal `spn-databricks-fabric-reader` aangemaakt,
-met client-ID `73d92d95-9287-4778-917c-bb86e63e5473`. De service principal is
-lid van de dedicated Entra security group
-`grp-fabric-contoso-databricks-readers`
-(`ad49fc75-cf5c-4fc9-94e9-f4fd9c7ceb7f`). Het Fabric-item `Contoso_database`
-staat in workspace `retail_lakehouse_dev`
-(`0aaf238c-abe9-4497-9943-87a6a6d23ebd`). Op 6 september 2026 is de Fabric
-tenantpolicy `Service principals can call Fabric public APIs` beperkt tot
-uitsluitend `grp-fabric-contoso-databricks-readers`. De groep heeft vervolgens
-de Viewer-rol in `retail_lakehouse_dev` gekregen, via de Fabric-portal
-gevalideerd met de Power BI-workspace-API. De jaarlijkse Entra-clientcredential
-kan niet vanuit de geautomatiseerde omgeving worden opgeslagen: secretwaarden
-worden daar vóór verwerking geredigeerd. De secret scope `fabric-extract`
-bevat `client-id`, `client-secret` en `tenant-id`; op 6 september 2026 is de
-client-secretwaarde daarom na handmatige secretcreatie rechtstreeks in de
-Databricks CLI ingevoerd. Credentials worden niet in Git of documentatie
-opgenomen.
-
-De JDBC-proef bevestigde vervolgens Entra-authenticatie en verbinding met
-`Contoso_database`. Een eerste externe databasegebruiker, aangemaakt op basis
-van de service-principal-weergavenaam, bleek niet met de JDBC-login-SID overeen
-te komen en had daardoor geen effectief `SELECT`-recht. Fabric SQL koppelt de
-JDBC-login aan het application/client-ID. De databasegebruiker is daarom
-vervangen door de JDBC-loginnaam
-`73d92d95-9287-4778-917c-bb86e63e5473@f9350d85-6f0e-42fd-8385-a59c2f09ec1a`,
-met de client-ID als externe SID en met uitsluitend `SELECT` op
-`SalesLT.vw_databricks_sales_order_line`; de SID-koppeling is vervolgens in de
-database bevestigd. De laatste JDBC-leesproef op de view geeft nog
-`Invalid object name`, de SQL Server-melding die ook bij ontbrekende effectieve
-objectrechten optreedt. De effectieve objecttoegang van de application-ID is
-daarmee nog open als technische validatiepunt; er zijn bewust geen bredere
-schema- of database-rechten toegekend. Op 6 september 2026 is de service
-principal aanvullend rechtstreeks als Viewer toegevoegd aan workspace
-`retail_lakehouse_dev`, naast het bestaande groepslidmaatschap. De onmiddellijke
-JDBC-herproef faalde nog; na Fabric-autorisatiepropagatie moet uitsluitend de
-read-only JDBC-proef worden herhaald. Een aanvullende proef met de ingebouwde
-database-rol `db_datareader` voor de JDBC-loginnaam is op 6 september 2026
-succesvol toegekend, maar loste de `Invalid object name`-fout niet op. Daarmee
-is vastgesteld dat de fout niet door de object-, schema- of database-
-leespermissie wordt veroorzaakt. De service-principal-token wordt door de
-Fabric SQL-database nog niet aan de verwachte databaseprincipal gekoppeld;
-verdere oplossing vereist een ondersteund Fabric SQL-service-principal-
-authenticatiepatroon of Microsoft-supportonderzoek. Een aanvullende directe
-Fabric-workspacerol `Contributor` voor de service principal loste de JDBC-fout
-evenmin op; er is bewust niet verder opgeschaald naar `Admin`.
-Een aansluitende JDBC-proef met de gebruiker geformatteerd als
-`application-id@tenant-id` authenticeerde eveneens, maar gaf nog steeds
-`Invalid object name` voor de contractview. Daarmee is ook de JDBC-
-gebruikersnaamvariant als oorzaak uitgesloten.
-
-Op 6 september 2026 is de oorzaak van de JDBC-storing vastgesteld en opgelost.
-De eerdere proeven gebruikten ten onrechte het SQL analytics endpoint
-`*.datawarehouse.fabric.microsoft.com` en de logische naam
-`Contoso_database`. De Fabric SQL-database vereist het eigen TDS-endpoint
-`qugtl6ion76ufa4fuwoc6cpmdi-rqr26cxjvolujgkdq6tknur6xu.database.fabric.microsoft.com`,
-TLS-validatie voor `*.database.windows.net` en de fysieke databasenaam
-`Contoso_database-a2e53891-642a-4a0c-9a7f-c72e1351ff57`. De serverless
-Databricks JDBC-proef is daarna succesvol uitgevoerd: de technische identity
-las 542 rijen uit `SalesLT.vw_databricks_sales_order_line`.
-
-Dit platte broncontract volgt na Bronze en Quality de bestaande
-`REFERENCE_DATA`-route. Daarmee wordt Raw Vault bewust overgeslagen, terwijl
-de versioned referentietabel in Business Vault en de atomische Gold Current-
-publicatie behouden blijven. De Databricks JDBC-extractor en de metadata voor
-deze route zijn de resterende implementatiestappen.
-
-## 8. Productie-readiness
-
-### Status per domein
-
-| Domein | Beoordeling | Toelichting |
+| Requirement | Realisatie | Bewijsstatus |
 |---|---|---|
-| Architectuur | Groen/amber | Sterke basis; conceptueel passend voor de doelstelling. |
-| Metadata-gedreven ontwerp | Groen | Seed, mappings, regels, afhankelijkheden en DV/Gold-definities aanwezig. |
-| Delivery-gate | Groen/amber | Werkt in dev; uitgebreide failure-matrix nog uitvoeren. |
-| Data Vault | Amber | Kernmodel werkt; effectivity satellite-loadlogica staat nog open. |
-| Gold Actueel | Groen/amber | Atomische groepspublicatie ontworpen en deels bewezen; foutinjectie nog formeel testen. |
-| Schema evolution | Amber | Beleid en retries aanwezig; governanceproces voor nieuwe kolommen moet worden ingericht. |
-| Schaalbaarheid | Amber | Fan-out is begrensd; tien-delivery en enterprise-volume benchmark ontbreken. |
-| Governance | Rood/amber | Owner, PII, retentie, SLA en cost center ontbreken nog als metadata-contract. |
-| Operationeel beheer | Amber | Monitoring en maintenance bestaan; runbooks, on-call en rejectproces moeten worden belegd. |
-| Security | Amber | UC-grants zijn ontworpen; formele autorisatie- en secretscan moet nog worden uitgevoerd. |
-| Disaster recovery | Rood/amber | Backup/restore, replay, cross-region en RPO/RTO zijn niet aangetoond. |
-| Kostenbeheersing | Amber | Serverless gekozen; DBU- en Azure-usage moeten nog worden gemeten en begrensd. |
+| Leveringen per bron en datumfolder | Bron-specifieke immutable Landing Volumes | Gevalideerd in dev |
+| Incrementeler Bronze-load | Auto Loader met checkpoints en metadata per object | Gevalideerd in dev |
+| Nieuwe bronkolommen accepteren | `RESCUE`, `addNewColumns` en Delta `MERGE WITH SCHEMA EVOLUTION` | Gevalideerd met Fabric Sales |
+| Onvolledige levering blokkeren | Delivery-gate op verplichte objecten en chronologische selectie | Gevalideerd in dev |
+| Metadata-gedreven besturing | Objecten, mappings, DQ, routes, DV en Gold in Git-beheerde seedmetadata | Gevalideerd |
+| Rejects opslaan | Payload, alle faalredenen en herstelstatus in `rj_*` | DDL en gedrag gevalideerd |
+| Historiseren | Raw Vault, Business Vault en SCD2 Gold Historisch | Gevalideerd in dev |
+| Actuele datamart | Current views op v1/v2-slots met groepsreleasepointer | Gevalideerd in dev |
+| Oude versie behouden bij fout | Pointer wijzigt pas na volledige succesvolle build | Ontwerp en foutscenario gevalideerd |
+| Herleidbaarheid | Audit-events, delivery, batch, bronbestand en metadata-versie | Gevalideerd in dev |
 
-### Besluit
+## 5. Architectuur
 
-**Niet vrijgeven voor productie.** Het project is geschikt als architectuurprototype en als basis voor een gecontroleerde testomgeving. Productieacceptatie vereist minimaal:
+| Laag | Verantwoordelijkheid |
+|---|---|
+| Landing Volume | Ongewijzigde, immutable bronbestanden per datum |
+| Bronze | Alle bronkolommen plus technische lineage, zonder businessfilter |
+| Quality | Typen, contracteren en valideren volgens metadata |
+| Reject | Ongeldige records met originele payload en alle faalredenen |
+| Raw Vault | Hubs, links en historiserende satellites zonder interpretatie |
+| Business Vault | Computed satellites, PIT en versioned referentiedata |
+| Gold Historisch | Historisch dimensioneel contract met SCD2-informatie |
+| Gold Actueel | Laatste volledig succesvolle release per publicatiegroep |
+| Metadata/Audit | Besturing, versiebeheer, status, kwaliteit en monitoring |
 
-1. volledige testmatrix inclusief tien-delivery stresstest;
-2. bewezen SCD2, deletes, effectivity en idempotente recovery;
-3. formele security-, privacy-, governance- en autorisatiegoedkeuring;
-4. ingevulde omgevingsparameters en productie-identiteiten;
-5. SLA, RPO/RTO, monitoring, alerting, runbooks en on-call-proces;
-6. gemeten DBU-, opslag- en egresskosten met budgetlimieten;
-7. gecontroleerde CI/CD-promotie naar `tst` en `prd`;
-8. formele businessacceptatie van Gold-contracten en freshness.
+### Metadata als besturingslaag
 
-## 9. Openstaande acties
+De bestanden in `metadata/seed` zijn de versieerbare bron van waarheid. De setup-job synchroniseert deze idempotent naar Unity Catalog. Het model bevat systemen, objecten, connectors, mappings, kwaliteitsregels, afhankelijkheden, Data Vault-entiteiten, Gold-entiteiten en auditmetadata.
 
-| Prioriteit | Actie | Eigenaar bij overdracht |
+Elke metadatarelease krijgt een deterministische SHA-256-fingerprint. Audit-runs bewaren die versie, zodat incidentonderzoek en herverwerking aan de exacte Git/DAB-configuratie kunnen worden gekoppeld.
+
+### Orchestratie en delivery-gate
+
+De workflow bevat alleen technische lagen; inhoudelijke entiteitsafhankelijkheden staan in metadata en worden topologisch geordend.
+
+```text
+validate_metadata
+  -> plan_bronze_fanout
+  -> bronze_ingest
+  -> delivery_gate
+  -> quality
+  -> raw_vault en/of reference_data
+  -> business_vault
+  -> gold_historical
+  -> gold_current
+```
+
+Bronze gebruikt een begrensde Databricks `for_each_task` per bronobject. De gate opent alleen voor een complete levering met succesvolle verplichte objecten. Een latere levering wacht op de oudste nog niet afgehandelde levering van hetzelfde bronsysteem. Dit beschermt de tijdsvolgorde van snapshot- en SCD2-verwerking.
+
+De end-to-end pipeline kan standaard drie gelijktijdige runs uitvoeren. Deze
+paralleliteit is bedoeld voor onafhankelijke bronsystemen. De delivery-gate
+handhaaft de chronologische seriele verwerking binnen ieder bronsysteem; voor
+een hoger volume moeten runtimes, Delta-concurrency en kosten eerst worden
+gemeten.
+
+### Data Vault en Gold
+
+De Raw Vault gebruikt SHA-256, centrale normalisatie, een null-token en separator. Multi-source hubs gebruiken een collision code. Satellites zijn fysiek insert-only; `load_end_date` en `is_current` worden via views afgeleid. Zo wordt historisch Delta-data niet bij iedere load herschreven.
+
+Gold Actueel gebruikt per publicatiegroep twee fysieke slots (`_v1` en `_v2`). Publieke views volgen een enkele releasepointer. Bij een mislukte build blijft die pointer ongewijzigd en zien BI-consumenten de vorige consistente release.
+
+### Brontypen
+
+| Bronsysteem | Aanleverpatroon | Status |
 |---|---|---|
-| P0 | Volledige end-to-end acceptatietest afronden | Data engineering |
-| P0 | Production security, privacy en grants testen | Platform/security |
-| P0 | RPO/RTO, restore en replay aantonen | Platform/operations |
-| P0 | Herstel-setup, bronextracties en brongebonden volledige pipeline-runs afronden en Gold-publicaties controleren | Data engineering/platform |
-| P1 | CDC en partial snapshot laadstrategieën toevoegen | Data engineering |
-| P1 | Effectivity satellite-loadlogica toevoegen | Data Vault engineering |
-| P1 | Reject-herverwerking als werkproces inrichten | Data operations/data stewards |
-| P1 | Governancevelden toevoegen: owner, PII, retentie, SLA, cost center | Data governance |
-| P1 | DBU/Azure-kosten meten en budgetalerts instellen | FinOps/platform |
-| P1 | CBS `86204NED` onboarden: landingvolume, OData-extract, objectcontract en Vault/Gold-metadata | Data engineering/architecture |
-| P1 | Freshness- en versiecontracten ontwerpen voor Gold-data producten die bronnen combineren | Data architecture |
-| P1 | Multi-source Business-Vault-integratierun ontwerpen, inclusief matching/masteringregels | Data Vault engineering |
-| P1 | Snapshot-compleetheid en expire-logica toevoegen aan `REFERENCE_DATA` | Data engineering |
-| P1 | ECB-wisselkoersbron ontwerpen en onboarden voor tijdsafhankelijke Sales-bedragverrijking | Data engineering/finance |
-| P2 | Delta control-table lookup voor zeer grote fan-outs | Platform engineering |
-| P2 | Metadata-SCD2 alleen toevoegen als runtime-configuratie buiten Git nodig is | Architecture board |
+| `SALES` | Push: ERP-export naar Landing | Actief |
+| `CBS` | Pull: OData naar Landing | Actief |
+| `ECB` | Pull: HTTP/CSV naar Landing | Actief |
+| `NAGER` | Pull: HTTP/JSON naar Landing | Actief |
+| `FABRIC_SALES` | Pull: JDBC uit Fabric SQL naar Landing | Actief en gevalideerd |
+| `SHAREPOINT` | Voorbereid in metadata | Inactief |
 
-## 10. Tijd en kosten
+Wanneer een immutable delivery al in Landing staat, kan de generieke pipeline direct vanaf Bronze worden gestart. Dit is het gecontroleerde herstelpad na een fout in Quality, Vault of Gold, zonder de bron opnieuw te belasten.
 
-De lokale Copilot-sessiehistorie registreert voor het v1- en v2-traject samen 17 interactieve sessies met 383 turns. De som van de geregistreerde sessievensters is ongeveer **31 uur en 55 minuten**. De kalenderdoorlooptijd liep van 29 augustus tot 2 september 2026, ongeveer **4 dagen en 11 uur**.
+## 6. Belangrijkste ontwerpkeuzes
 
-Dit is geen betrouwbare factuurmeting: pauzes kunnen zijn inbegrepen en werk buiten Copilot ontbreekt. De lokale opslag bevat geen tokengebruik, modelprijzen of Copilot-factuurgegevens. Ook zijn de Databricks DBU- en Azure-verbruikskosten niet vastgelegd; deze moeten uit Databricks system billing en Azure Cost Management worden gehaald.
+1. **Landing is immutable.** Extracties schrijven eerst naar staging en publiceren pas na succesvolle voltooiing naar de datumfolder.
+2. **Bronze bewaart de bron.** Bij `RESCUE` blijven onbekende velden fysiek in Bronze via schema evolution; Quality bepaalt het expliciete businesscontract.
+3. **Metadata is privileged code.** Metadata is Git-beheerd, identifiers worden gevalideerd en eindgebruikers krijgen in productie geen schrijfrechten.
+4. **Quality werkt in een gecombineerde pass.** Dit voorkomt N tabelscans voor N kwaliteitsregels.
+5. **Audit is append-only.** Parallelle Serverless-taken schrijven events; statusviews leiden daaruit de actuele status af.
+6. **Routes zijn expliciet.** `RAW_VAULT` en `REFERENCE_DATA` voorkomen dat referentiebronnen onnodig als hubs, links en satellites worden gemodelleerd.
+7. **Gold Actueel is een groepscontract.** De publicatiegroep voorkomt nieuwe dimensies naast oude feiten.
 
-## 11. Overdracht
+## 7. Validatie en herstelbevindingen
 
-De technische besluiten en runtimebevindingen staan in [00_besluitenlog.md](00_besluitenlog.md). Dit document is de samenvatting voor besluitvorming en overdracht. De aanbevolen volgende stap is het afronden van de acceptatietestmatrix en het herbeoordelen van de productie-gate op basis van meetresultaten, securitybewijs en operationele eigenaarschap.
+### Lokale en deploymentvalidatie
+
+De regressiesuite controleert onder meer hashconventies, veilige identifiers, placeholderresolutie, DQ-drempels, afhankelijkheidsgrafen, schema-drift, Gold-publicatie, connectoren en DDL-dekking.
+
+```text
+py -m pytest -q
+98 passed
+```
+
+Daarnaast is lokaal geborgd dat de zelfstandige CBS-, ECB- en Fabric Sales-laadjobs
+eerst hun pull-/extracttaak uitvoeren en pas daarna de generieke pipeline starten.
+De pull-laadjobs zijn bovendien voorzien van Databricks schedules: in `dev`
+standaard gepauzeerd en in `tst`/`prd` activeerbaar via de bundle-variabele
+`pull_schedule_pause_status`.
+
+De Databricks Asset Bundle is gevalideerd en naar `dev` gedeployed. De idempotente setup-job is na relevante DDL- en metadatawijzigingen succesvol uitgevoerd.
+
+Op 7 september 2026 is de stressleveringsgenerator aangescherpt na een instabiele run. De write-stap valideerde eerder exact het aantal part-files per object en kon daardoor falen bij adaptive Spark-planning. De generator accepteert nu elk positief aantal geschreven part-files, verwijdert vooraf eventuele stagingresten en geeft expliciete feedback over het daadwerkelijk geschreven aantal bestanden per object. Daarnaast geeft het notebook nu een duidelijkere melding bij hergebruik van een bestaande `delivery_date`.
+
+De hervatting van Fase 2 van de Sales-stresstest is op 7 september 2026 operationeel geblokkeerd. Een lokale `databricks bundle validate --target dev` bereikte de dev-workspace, maar eindigde met HTTP 403 `Invalid access token`; er is daardoor geen job of datawijziging gestart. Vernieuw eerst de lokaal geconfigureerde Databricks-authenticatie en valideer de bundle opnieuw. Start daarna de pipeline voor `SALES`: de chronologische gate moet eerst `SALES|2026-09-10` verwerken en pas vervolgens `SALES|2026-09-11` met `change_set=1`. Controleer na beide succesvolle runs de SCD2-versies, deletes, hashdiffs en de actieve `SALES_MART`-publicatiegroep.
+
+Na vernieuwde CLI-authenticatie valideerde de Asset Bundle op 7 september 2026 succesvol voor `dev`. Pipelinerun `775524928887640` startte voor `SALES` en eindigde technisch succesvol na 244 seconden. Metadata-validatie en alle vijf Bronze-objecttaken slaagden; de delivery-gate gaf `SKIPPED` terug en zette de conditionele vervolgroute correct uit. Daardoor startten Quality, Vault en Gold niet. De gate retourneert uitsluitend `SKIPPED` wanneer `v_next_processable_delivery` geen complete, nog niet verwerkte Sales-delivery bevat. De eerder genoemde folders `2026-09-10` en `2026-09-11` zijn in deze runtime dus niet beschikbaar als verwerkbare wachtrij of voldoen niet aan het actuele metadata-contract; vervolgonderzoek vereist read-only inspectie van `audit_delivery`, `audit_delivery_object` en de Gold-publicatiegroep.
+
+### Bewezen scenario's
+
+- Valide Sales-deliveries doorlopen de volledige Raw Vault- en Gold-keten.
+- Een ongeldige delivery wordt bij Quality geblokkeerd; Vault en Gold starten dan niet.
+- De chronologische gate verwerkt geen nieuwere delivery zolang een oudere nog geblokkeerd is.
+- CBS, ECB en Nager zijn als brongebonden data-producten ingericht.
+- ECB filtert expliciet niet-castbare SDMX-observaties, maar blokkeert nul- en negatieve wisselkoersen nog steeds hard.
+- Gold-entiteiten zijn aan `source_system_id` gebonden. Een niet-Sales-delivery kan daardoor geen `SALES_MART` publiceren.
+- `FABRIC_SALES|2026-09-06` is volledig verwerkt met 542 rijen in Bronze, Quality, Reference Data, historisch Gold en actueel Gold.
+
+### Fabric Sales: feitelijke herstelcyclus
+
+De eerste Fabric Sales-run faalde terecht in Bronze: de live metadata voor onbekende velden was niet met de Git-seed gesynchroniseerd en vereiste mapping-goedkeuring. Na deploy en setup stond de runtime weer op `RESCUE`.
+
+De volgende run bereikte Quality en toonde dat `total_due_amount` voor alle 542 regels `NULL` was. Read-only onderzoek bevestigde dat `subtotal_amount`, `tax_amount` en `freight_amount` gevuld waren. De Quality-mapping leidt daarom het totaal deterministisch af als:
+
+$$
+\text{total\_due\_amount} = \text{subtotal\_amount} + \text{tax\_amount} + \text{freight\_amount}
+$$
+
+De harde DQ-controle voor ontbrekende of negatieve totalen blijft actief. Een daaropvolgende run vond de ontbrekende rejecttabel `contoso_reject_dev.fabric_sales.rj_order_lines`; deze is idempotent aan de DDL en het steward-overzicht toegevoegd. Na deploy en setup was de volgende run volledig succesvol.
+
+Deze cyclus toont gecontroleerd herstel: brondata is niet aangepast; alle correcties waren metadata- of DDL-gedreven, lokaal getest, gedeployed en in de runtime opnieuw bewezen.
+
+## 8. Enterprise-beoordeling
+
+### Sterke punten
+
+- Nieuwe objecten zijn grotendeels configureerbaar zonder pipelinecode.
+- Bronsystemen en Gold-publicaties zijn bewust gescheiden.
+- Immutable Landing, delivery-gate en chronologie beperken gedeeltelijke en out-of-order historisatie.
+- Metadata-validatie, DQ en traceerbare rejects maken beheer op grotere schaal realistisch.
+- De atomische Gold-pointer beschermt consumenten tegen inconsistente marts.
+
+### Grenzen en resterende risico's
+
+- Task values voor fan-out hebben een limiet. Bij veel objecten is een Delta control-tabel als plannerinput nodig.
+- `SNAPSHOT_SCD2` voor Reference Data mist nog een formeel snapshot-compleetheidscontract en expire-logica voor verdwenen sleutels.
+- Multi-source integratie vereist een aparte Business Vault-run met matching, mastering, freshness- en versiecontracten.
+- Nieuwe Bronze-kolommen zijn technisch veilig op te slaan, maar vragen nog een formeel governanceproces voor classificatie, mapping en Gold-publicatie.
+- De uitgevoerde tests bewijzen gedrag, niet productiecapaciteit, kostenplafond of herstelbaarheid binnen een afgesproken RPO/RTO.
+
+## 9. Productie-readiness
+
+| Domein | Status | Benodigde vervolgstap |
+|---|---|---|
+| Functionele kernketen | Groen | Behouden als acceptatiebaseline |
+| Metadata en orkestratie | Groen/amber | Schaaltest en plannerfallback toevoegen |
+| Schema evolution | Groen/amber | Governance- en approvalproces operationaliseren |
+| Data Vault | Amber | Effectivity- en delete-scenario's aantonen |
+| Gold Actueel | Groen/amber | Foutinjectie over alle views herhalen |
+| Security en privacy | Amber | Least-privilege, PII-classificatie en secretscan formaliseren |
+| Operations en recovery | Amber/rood | Runbooks, replay en RPO/RTO testen |
+| Performance en kosten | Amber | Volume-, DBU- en storagebenchmark uitvoeren |
+
+Het advies is: **nog niet vrijgeven voor productie**, maar het resultaat wel accepteren als werkend en aantoonbaar gevalideerd prototype. Een volgende fase moet gericht zijn op het bewijzen en operationaliseren van niet-functionele productiekwaliteit, niet op ontbrekende basisfunctionaliteit.
+
+## 10. Conclusie
+
+De doelstelling is gerealiseerd. Er staat een metadata-gedreven Lakehouse-prototype waarin bronnen via Landing gecontroleerd worden verwerkt, datakwaliteit en afwijzingen traceerbaar zijn, historisatie via Data Vault of versioned Reference Data plaatsvindt en Gold Actueel uitsluitend na een volledige succesvolle run atomisch wordt gepubliceerd.
+
+De uitvoering toont bovendien dat het ontwerp onder realistische fouten beheersbaar blijft. Schema-drift, een onvolledig bedragcontract en een ontbrekende rejectvoorziening zijn onderzocht, structureel hersteld en opnieuw gevalideerd. Daarmee is dit meer dan een architectuurtekening: een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-ontwerpprincipes**.
+
+Voor technische verdieping wordt verwezen naar [architectuur](01_architecture.md), [workflowontwerp](05_workflow_design.md) en de [besluitenlog](00_besluitenlog.md).
+
+## 11. Architectuurreview 7 september 2026
+
+Op verzoek is een kritische review uitgevoerd vanuit het perspectief Principal Data Architect (Databricks, Delta Lake, Data Vault 2.0, Fabric). Kernbevindingen:
+
+- **Schaalbaarheid**: delivery-gate en chronologische catch-up serialiseren te sterk voor honderden objecten; Gold-MERGE doet full-scans zonder incrementeel venster.
+- **Beheer**: metadata mist versie-/approvalproces (policy `ALLOW_NEW_COLUMNS_WITH_APPROVAL` heeft geen approval-mechanisme), retry-configuratie is gedenormaliseerd, cycle-detectie op de afhankelijkheidsgraaf ontbreekt.
+- **Performance**: Auto Loader-checkpoints liggen in de raw Volume (retentierisico); `mergeSchema`-reader-optie is overbodig; liquid clustering verkiezen boven ZORDER op hash-keys.
+- **Afhankelijkheden**: `SAME_DELIVERY` is gedefinieerd maar nergens toegepast; out-of-order leveringen (late levering die in het verleden moet invoegen) zijn ongedefinieerd.
+- **Metadata-tekortkomingen**: delete-semantiek (hard/soft/absence), late-arrival-window, freshness-SLA, schema-contractversie en backfill-strategie ontbreken.
+- **Laadstrategieën**: `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT` zijn enterprise-kritisch en moeten vóór verdere brononboarding worden geïmplementeerd; scope van `SNAPSHOT_SCD2` (welke laag, absence-detectie) moet expliciet.
+- **Schema evolution**: alleen additief gedekt; rename/drop en remediatie vanuit `_rescued_data` ontbreken; bij schaal is een voorgestelde-metadata-diff-generator nodig.
+- **Gold Actueel**: slotwisseling is per entiteit (inconsistentievenster binnen een publication group); soft deletes verdwijnen stilletjes uit de actuele mart; rollback beperkt tot één versie.
+- **Fabric**: hybride landschap vereist expliciete keuzes rond OneLake-shortcuts, tweede security-perimeter en eigenaarschap van de actuele mart.
+
+Besluit: fundament (metadata-gedrevenheid, gate, rejects, atomische publicatie) is enterprise-waardig; prioriteit ligt bij delete-/rename-semantiek, CDC + PARTIAL_SNAPSHOT, metadata-CI/CD en tiering van de gate.
+
+## 12. Verwerking review — 7 september 2026
+
+Eerste, laag-risico reeks verbeteringen is doorgevoerd:
+
+- **`meta_source_object.json`**: alle elf bronobjecten hebben nu `delete_semantics`, `absence_means_delete`, `schema_contract_version`, `late_arrival_window_days`, `freshness_sla_hours` en `backfill_strategy`. Delete-semantiek is alleen `SOFT_DELETE_FLAG` waar een `is_deleted`-vlag bestaat; `absence_means_delete` alleen `true` bij volledige gecureerde snapshots (SALES-dimensies, SharePoint, Fabric), niet bij append-only of referentiefeeds (CBS, ECB, Nager). Checkpoints van de SALES-objecten zijn verplaatst van `raw_${env}` naar `control_${env}` om het retentierisico op de landingzone te dichten.
+- **`meta_dependency.json`**: de vier kern-links (`LNK_ORDER_CUSTOMER`, `LNK_ORDER_PRODUCT`) gebruiken nu `SAME_DELIVERY` in plaats van `UPSTREAM_SUCCESS`, zodat hubs uit dezelfde levering worden gecombineerd.
+- **`10_metadata_model.sql`**: twee nieuwe tabellen toegevoegd — `meta_retry_policy` (referentie voor retry/prioriteit, tegen duplicatie in `meta_dependency`) en `meta_schema_drift_approval` (formele PENDING/APPROVED/REJECTED-workflow, waarmee de bestaande policy `ALLOW_NEW_COLUMNS_WITH_APPROVAL` afdwingbaar wordt).
+- **`02_metadata_model.md`**: nieuwe velden en tabellen gedocumenteerd.
+
+Nog openstaand (bewust niet in deze ronde): implementatie van `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT`, incrementeel venster in Gold-MERGE, gate-tiering op `criticality`, en cycle-detectie op de afhankelijkheidsgraaf.
+
+## 13. Verwerking resterende reviewpunten — 7 september 2026 (tweede ronde)
+
+De vier bewust uitgestelde punten zijn nu alsnog doorgevoerd en getest (86/86 groen):
+
+- **Laadstrategieën `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT`** geïmplementeerd in [bronze.py](../src/contoso_lakehouse/bronze.py). CDC voegt `_cdc_op` toe aan de MERGE-match zodat I/U/D apart landt; SCD2-resolutie blijft downstream. PARTIAL_SNAPSHOT deelt het APPEND-pad maar respecteert `absence_means_delete=false`, zodat een deelsnapshot nooit als delete wordt geïnterpreteerd. De test die beweerde dat CDC onbekend was, is omgebouwd tot een test die het correcte MERGE-gedrag bewijst.
+- **Incrementeel venster in Gold-MERGE** in [gold.py](../src/contoso_lakehouse/gold.py): `load_historical` accepteert nu `incremental_since`; bij SCD2-entiteiten filtert de subquery op `load_date >= incremental_since`, waardoor de full-scan-per-run verdwijnt. Zonder waarde valt de loader veilig terug op de volledige set (backfill).
+- **Gate-tiering op `criticality`** in [orchestration.py](../src/contoso_lakehouse/orchestration.py): naast `require_delivery_complete` is er `require_delivery_critical_complete`, die alleen HIGH-criticaliteitsobjecten afdwingt. Eén traag MEDIUM/LOW-object blokkeert de keten niet meer.
+- **Governancevelden in het dataclass-model** in [metadata.py](../src/contoso_lakehouse/metadata.py): `SourceObject` draagt nu `delete_semantics`, `absence_means_delete`, `schema_contract_version`, `late_arrival_window_days`, `freshness_sla_hours` en `backfill_strategy`, zodat de loaders de seed-waarden daadwerkelijk kunnen gebruiken.
+
+Correctie op paragraaf 11: Gold Actueel publiceert al atomisch per publicatiegroep via één gedeelde releasepointer (`publish_group`), waardoor het eerdergenoemde inconsistentievenster binnen een groep niet bestaat.
+
+## 14. Liquid clustering metadata-gedreven gemaakt — 7 september 2026
+
+- De Gold-DDL gebruikte al `CLUSTER BY`, maar de metadata heette nog `zorder_columns` en was niet leidend. Dat is nu rechtgetrokken.
+- [meta_gold_entity.json](../metadata/seed/meta_gold_entity.json): alle 23 Gold-entiteiten gebruiken `cluster_columns`; `zorder_columns` is volledig verdwenen. Feiten behouden `partition_columns` op datum; dimensies gebruiken uitsluitend clustering op hun hash-key.
+- [metadata.py](../src/contoso_lakehouse/metadata.py): `GoldEntity` draagt nu `partition_columns` en `cluster_columns`, zodat de setup-notebook de DDL metadata-gedreven kan genereren.
+- Bestaande tabellen vereisen een eenmalige `ALTER TABLE ... CLUSTER BY` of rebuild; liquid clustering werkt incrementeel en vereist daarna minder `OPTIMIZE`-onderhoud dan ZORDER.

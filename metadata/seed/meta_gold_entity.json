@@ -7,10 +7,15 @@
     "target_schema": "historical",
     "target_table": "dim_customer_hist",
     "select_sql": "SELECT h.hk_customer AS customer_hk, h.customer_key, s.customer_name, s.email, s.phone, bv.full_address, s.city, s.state_province, s.postal_code, s.country_code, s.customer_segment, bv.customer_type, bv.tenure_band, bv.is_contactable, s.customer_since, s.is_deleted, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_customer h JOIN {vault_catalog}.raw_vault.sat_customer s ON s.hk_customer = h.hk_customer LEFT JOIN {vault_catalog}.business_vault.sat_customer_bv bv ON bv.hk_customer = h.hk_customer AND s.load_date >= bv.load_date AND s.load_date < coalesce(bv.load_end_date, timestamp'9999-12-31 23:59:59')",
-    "business_key_columns": ["customer_hk", "valid_from"],
+    "business_key_columns": [
+      "customer_hk",
+      "valid_from"
+    ],
     "scd_type": "SCD2",
     "partition_columns": null,
-    "zorder_columns": ["customer_hk"],
+    "cluster_columns": [
+      "customer_hk"
+    ],
     "depends_on_gold_entity_ids": null,
     "publish_mode": "MERGE",
     "load_order": 10,
@@ -24,21 +29,41 @@
     "target_schema": "historical",
     "target_table": "dim_product_hist",
     "select_sql": "SELECT h.hk_product AS product_hk, h.product_key, s.product_name, s.product_category, s.product_subcategory, s.brand, s.unit_cost, s.unit_price, cast(s.unit_price - s.unit_cost AS decimal(18,4)) AS unit_margin, s.is_discontinued, s.is_deleted, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_product h JOIN {vault_catalog}.raw_vault.sat_product s ON s.hk_product = h.hk_product",
-    "business_key_columns": ["product_hk", "valid_from"],
+    "business_key_columns": [
+      "product_hk",
+      "valid_from"
+    ],
     "scd_type": "SCD2",
     "partition_columns": null,
-    "zorder_columns": ["product_hk"],
+    "cluster_columns": [
+      "product_hk"
+    ],
     "depends_on_gold_entity_ids": null,
     "publish_mode": "MERGE",
     "load_order": 10,
     "is_active": true
   },
   {
-    "gold_entity_id": "GH_DIM_EMPLOYEE", "gold_layer": "HISTORICAL", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "dim_employee_hist",
+    "gold_entity_id": "GH_DIM_EMPLOYEE",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "dim_employee_hist",
     "select_sql": "SELECT h.hk_employee AS employee_hk, h.employee_key, s.first_name, s.last_name, s.job_title, s.office_city, s.hire_date, s.is_deleted, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_employee h JOIN {vault_catalog}.raw_vault.sat_employee s ON s.hk_employee = h.hk_employee",
-    "business_key_columns": ["employee_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["employee_hk"],
-    "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "employee_hk",
+      "valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "cluster_columns": [
+      "employee_hk"
+    ],
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true
   },
   {
     "gold_entity_id": "GH_FCT_SALES",
@@ -48,23 +73,55 @@
     "target_schema": "historical",
     "target_table": "fct_sales_hist",
     "select_sql": "SELECT lop.hk_order_product AS sales_line_hk, lop.hk_order AS order_hk, lop.hk_product AS product_hk, loc.hk_customer AS customer_hk, loe.hk_employee AS employee_hk, ho.order_key, lop.order_line_number, so.order_date, cast(date_format(so.order_date, 'yyyyMMdd') AS INT) AS order_date_key, so.order_status, so.currency_code, sol.quantity, sol.unit_price, sol.discount_amount, bv.gross_amount, bv.net_amount_calc AS net_amount, bv.discount_rate, bv.lead_time_days, bv.is_cancelled, sol.ship_date, sol.delivery_date, cast(date_format(sol.ship_date, 'yyyyMMdd') AS INT) AS ship_date_key, cast(date_format(sol.delivery_date, 'yyyyMMdd') AS INT) AS delivery_date_key, sol.load_date AS valid_from, coalesce(sol.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, sol.is_current, sol.record_source FROM {vault_catalog}.raw_vault.lnk_order_product lop JOIN {vault_catalog}.raw_vault.hub_order ho ON ho.hk_order = lop.hk_order JOIN {vault_catalog}.raw_vault.sat_order_line sol ON sol.hk_order_product = lop.hk_order_product LEFT JOIN {vault_catalog}.business_vault.sat_order_line_bv bv ON bv.hk_order_product = lop.hk_order_product AND bv.is_current LEFT JOIN {vault_catalog}.raw_vault.sat_order so ON so.hk_order = lop.hk_order AND so.is_current LEFT JOIN {vault_catalog}.raw_vault.lnk_order_customer loc ON loc.hk_order = lop.hk_order LEFT JOIN {vault_catalog}.raw_vault.lnk_order_employee loe ON loe.hk_order = lop.hk_order",
-    "business_key_columns": ["sales_line_hk", "valid_from"],
+    "business_key_columns": [
+      "sales_line_hk",
+      "valid_from"
+    ],
     "scd_type": "SCD2",
-    "partition_columns": ["order_date"],
-    "zorder_columns": ["customer_hk", "product_hk"],
-    "depends_on_gold_entity_ids": ["GH_DIM_CUSTOMER", "GH_DIM_PRODUCT"],
+    "partition_columns": [
+      "order_date"
+    ],
+    "cluster_columns": [
+      "customer_hk",
+      "product_hk"
+    ],
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_CUSTOMER",
+      "GH_DIM_PRODUCT"
+    ],
     "publish_mode": "MERGE",
     "load_order": 20,
     "is_active": true
   },
   {
-    "gold_entity_id": "GH_FCT_RETURNS", "gold_layer": "HISTORICAL", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "fct_returns_hist",
+    "gold_entity_id": "GH_FCT_RETURNS",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "fct_returns_hist",
     "select_sql": "SELECT lrop.hk_return_order_product AS return_line_hk, lrop.hk_return AS return_hk, lrop.hk_order AS order_hk, lrop.hk_product AS product_hk, loc.hk_customer AS customer_hk, lre.hk_employee AS employee_hk, hr.return_key, ho.order_key, lrop.order_line_number, sr.return_date, cast(date_format(sr.return_date, 'yyyyMMdd') AS INT) AS return_date_key, sr.return_status, sr.return_reason_code, sr.return_quantity, sr.refund_amount, sr.currency_code, sr.load_date AS valid_from, coalesce(sr.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, sr.is_current, sr.record_source FROM {vault_catalog}.raw_vault.lnk_return_order_product lrop JOIN {vault_catalog}.raw_vault.hub_return hr ON hr.hk_return = lrop.hk_return JOIN {vault_catalog}.raw_vault.hub_order ho ON ho.hk_order = lrop.hk_order JOIN {vault_catalog}.raw_vault.sat_return sr ON sr.hk_return_order_product = lrop.hk_return_order_product LEFT JOIN {vault_catalog}.raw_vault.lnk_order_customer loc ON loc.hk_order = lrop.hk_order LEFT JOIN {vault_catalog}.raw_vault.lnk_return_employee lre ON lre.hk_return = lrop.hk_return",
-    "business_key_columns": ["return_line_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": ["return_date"], "zorder_columns": ["employee_hk", "product_hk"],
-    "depends_on_gold_entity_ids": ["GH_DIM_CUSTOMER", "GH_DIM_PRODUCT", "GH_DIM_EMPLOYEE"], "publish_mode": "MERGE", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "return_line_hk",
+      "valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": [
+      "return_date"
+    ],
+    "cluster_columns": [
+      "employee_hk",
+      "product_hk"
+    ],
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_CUSTOMER",
+      "GH_DIM_PRODUCT",
+      "GH_DIM_EMPLOYEE"
+    ],
+    "publish_mode": "MERGE",
+    "load_order": 20,
+    "is_active": true
   },
-
   {
     "gold_entity_id": "GC_DIM_CUSTOMER",
     "gold_layer": "CURRENT",
@@ -73,18 +130,24 @@
     "target_schema": "current",
     "target_table": "dim_customer",
     "select_sql": "SELECT customer_hk, customer_key, customer_name, email, phone, full_address, city, state_province, postal_code, country_code, customer_segment, customer_type, tenure_band, is_contactable, customer_since, valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_customer_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["customer_hk"],
+    "business_key_columns": [
+      "customer_hk"
+    ],
     "scd_type": "SNAPSHOT",
     "partition_columns": null,
-    "zorder_columns": ["customer_hk"],
-    "depends_on_gold_entity_ids": ["GH_DIM_CUSTOMER"],
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_CUSTOMER"
+    ],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
     "publish_status": "READY",
     "pointer_table": "contoso_gold_${env}.current.dim_customer",
     "staging_table": "contoso_gold_${env}.current_internal.dim_customer_v2",
     "load_order": 30,
-    "is_active": true
+    "is_active": true,
+    "cluster_columns": [
+      "customer_hk"
+    ]
   },
   {
     "gold_entity_id": "GC_DIM_PRODUCT",
@@ -94,32 +157,76 @@
     "target_schema": "current",
     "target_table": "dim_product",
     "select_sql": "SELECT product_hk, product_key, product_name, product_category, product_subcategory, brand, unit_cost, unit_price, unit_margin, is_discontinued, valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_product_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["product_hk"],
+    "business_key_columns": [
+      "product_hk"
+    ],
     "scd_type": "SNAPSHOT",
     "partition_columns": null,
-    "zorder_columns": ["product_hk"],
-    "depends_on_gold_entity_ids": ["GH_DIM_PRODUCT"],
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_PRODUCT"
+    ],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
     "publish_status": "READY",
     "pointer_table": "contoso_gold_${env}.current.dim_product",
     "staging_table": "contoso_gold_${env}.current_internal.dim_product_v2",
     "load_order": 30,
-    "is_active": true
+    "is_active": true,
+    "cluster_columns": [
+      "product_hk"
+    ]
   },
   {
-    "gold_entity_id": "GC_DIM_EMPLOYEE", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_employee",
+    "gold_entity_id": "GC_DIM_EMPLOYEE",
+    "gold_layer": "CURRENT",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "dim_employee",
     "select_sql": "SELECT employee_hk, employee_key, first_name, last_name, job_title, office_city, hire_date, valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_employee_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["employee_hk"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["employee_hk"], "depends_on_gold_entity_ids": ["GH_DIM_EMPLOYEE"],
-    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_employee", "staging_table": "contoso_gold_${env}.current_internal.dim_employee_v2", "load_order": 30, "is_active": true
+    "business_key_columns": [
+      "employee_hk"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_EMPLOYEE"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_employee",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_employee_v2",
+    "load_order": 30,
+    "is_active": true,
+    "cluster_columns": [
+      "employee_hk"
+    ]
   },
   {
-    "gold_entity_id": "GC_DIM_DATE", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_date",
+    "gold_entity_id": "GC_DIM_DATE",
+    "gold_layer": "CURRENT",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "dim_date",
     "select_sql": "SELECT cast(date_format(calendar_date, 'yyyyMMdd') AS INT) AS date_key, calendar_date, year(calendar_date) AS calendar_year, quarter(calendar_date) AS calendar_quarter, month(calendar_date) AS month_number, date_format(calendar_date, 'MMMM') AS month_name, weekofyear(calendar_date) AS week_number, dayofmonth(calendar_date) AS day_of_month, dayofweek(calendar_date) AS day_of_week, date_format(calendar_date, 'EEEE') AS day_name, dayofweek(calendar_date) IN (1, 7) AS is_weekend FROM (SELECT explode(sequence(date'2020-01-01', date'2030-12-31', interval 1 day)) AS calendar_date)",
-    "business_key_columns": ["date_key"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["date_key"], "depends_on_gold_entity_ids": null,
-    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_date", "staging_table": "contoso_gold_${env}.current_internal.dim_date_v2", "load_order": 30, "is_active": true
+    "business_key_columns": [
+      "date_key"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_date",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_date_v2",
+    "load_order": 30,
+    "is_active": true,
+    "cluster_columns": [
+      "date_key"
+    ]
   },
   {
     "gold_entity_id": "GC_FCT_SALES",
@@ -129,97 +236,390 @@
     "target_schema": "current",
     "target_table": "fct_sales",
     "select_sql": "SELECT sales_line_hk, order_hk, product_hk, customer_hk, employee_hk, order_key, order_line_number, order_date, order_date_key, order_status, currency_code, quantity, unit_price, discount_amount, gross_amount, net_amount, discount_rate, lead_time_days, is_cancelled, ship_date, delivery_date, ship_date_key, delivery_date_key FROM {gold_catalog}.historical.fct_sales_hist WHERE is_current AND NOT coalesce(is_cancelled, false)",
-    "business_key_columns": ["sales_line_hk"],
+    "business_key_columns": [
+      "sales_line_hk"
+    ],
     "scd_type": "SNAPSHOT",
-    "partition_columns": ["order_date"],
-    "zorder_columns": ["customer_hk", "product_hk"],
-    "depends_on_gold_entity_ids": ["GH_FCT_SALES", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT", "GC_DIM_EMPLOYEE", "GC_DIM_DATE"],
+    "partition_columns": [
+      "order_date"
+    ],
+    "depends_on_gold_entity_ids": [
+      "GH_FCT_SALES",
+      "GC_DIM_CUSTOMER",
+      "GC_DIM_PRODUCT",
+      "GC_DIM_EMPLOYEE",
+      "GC_DIM_DATE"
+    ],
     "publish_mode": "ATOMIC_SWAP",
     "publication_group_id": "SALES_MART",
     "publish_status": "READY",
     "pointer_table": "contoso_gold_${env}.current.fct_sales",
     "staging_table": "contoso_gold_${env}.current_internal.fct_sales_v2",
     "load_order": 40,
-    "is_active": true
+    "is_active": true,
+    "cluster_columns": [
+      "customer_hk",
+      "product_hk"
+    ]
   },
   {
-    "gold_entity_id": "GC_FCT_RETURNS", "gold_layer": "CURRENT", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "fct_returns",
+    "gold_entity_id": "GC_FCT_RETURNS",
+    "gold_layer": "CURRENT",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "fct_returns",
     "select_sql": "SELECT return_line_hk, return_hk, order_hk, product_hk, customer_hk, employee_hk, return_key, order_key, order_line_number, return_date, return_date_key, return_status, return_reason_code, return_quantity, refund_amount, currency_code FROM {gold_catalog}.historical.fct_returns_hist WHERE is_current",
-    "business_key_columns": ["return_line_hk"], "scd_type": "SNAPSHOT", "partition_columns": ["return_date"], "zorder_columns": ["employee_hk", "product_hk"],
-    "depends_on_gold_entity_ids": ["GH_FCT_RETURNS", "GC_DIM_CUSTOMER", "GC_DIM_PRODUCT", "GC_DIM_EMPLOYEE", "GC_DIM_DATE"],
-    "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.fct_returns", "staging_table": "contoso_gold_${env}.current_internal.fct_returns_v2", "load_order": 40, "is_active": true
+    "business_key_columns": [
+      "return_line_hk"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": [
+      "return_date"
+    ],
+    "depends_on_gold_entity_ids": [
+      "GH_FCT_RETURNS",
+      "GC_DIM_CUSTOMER",
+      "GC_DIM_PRODUCT",
+      "GC_DIM_EMPLOYEE",
+      "GC_DIM_DATE"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.fct_returns",
+    "staging_table": "contoso_gold_${env}.current_internal.fct_returns_v2",
+    "load_order": 40,
+    "is_active": true,
+    "cluster_columns": [
+      "employee_hk",
+      "product_hk"
+    ]
   },
   {
-    "gold_entity_id": "GH_DIM_PRICE_AGREEMENT", "source_system_id": "SHAREPOINT", "gold_layer": "HISTORICAL", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "dim_price_agreement_hist",
+    "gold_entity_id": "GH_DIM_PRICE_AGREEMENT",
+    "source_system_id": "SHAREPOINT",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "dim_price_agreement_hist",
     "select_sql": "SELECT h.hk_price_agreement AS price_agreement_hk, h.agreement_id, s.customer_segment, s.product_key, s.currency_code, s.list_price, s.discount_pct, s.valid_from, s.valid_to, s.agreement_status, s.updated_at, s.is_deleted, s.load_date AS version_valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS version_valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_price_agreement h JOIN {vault_catalog}.raw_vault.sat_price_agreement s ON s.hk_price_agreement = h.hk_price_agreement",
-    "business_key_columns": ["price_agreement_hk", "version_valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["price_agreement_hk"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "price_agreement_hk",
+      "version_valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "price_agreement_hk"
+    ]
   },
   {
-    "gold_entity_id": "GH_FCT_SALES_BUDGET", "source_system_id": "SHAREPOINT", "gold_layer": "HISTORICAL", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "fct_sales_budget_hist",
+    "gold_entity_id": "GH_FCT_SALES_BUDGET",
+    "source_system_id": "SHAREPOINT",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "fct_sales_budget_hist",
     "select_sql": "SELECT h.hk_sales_budget AS sales_budget_hk, h.budget_month, h.country_code, h.product_category, s.budget_id, s.currency_code, s.budget_revenue, s.budget_units, s.forecast_revenue, s.forecast_units, s.approved_at, s.updated_at, s.is_deleted, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_sales_budget h JOIN {vault_catalog}.raw_vault.sat_sales_budget s ON s.hk_sales_budget = h.hk_sales_budget",
-    "business_key_columns": ["sales_budget_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": ["budget_month"], "zorder_columns": ["country_code", "product_category"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "sales_budget_hk",
+      "valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": [
+      "budget_month"
+    ],
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "country_code",
+      "product_category"
+    ]
   },
   {
-    "gold_entity_id": "GC_DIM_PRICE_AGREEMENT", "source_system_id": "SHAREPOINT", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_price_agreement",
+    "gold_entity_id": "GC_DIM_PRICE_AGREEMENT",
+    "source_system_id": "SHAREPOINT",
+    "gold_layer": "CURRENT",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "dim_price_agreement",
     "select_sql": "SELECT price_agreement_hk, agreement_id, customer_segment, product_key, currency_code, list_price, discount_pct, valid_from, valid_to, agreement_status, updated_at FROM {gold_catalog}.historical.dim_price_agreement_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["price_agreement_hk"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["price_agreement_hk"], "depends_on_gold_entity_ids": ["GH_DIM_PRICE_AGREEMENT"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SHAREPOINT_SALES_INPUT", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_price_agreement", "staging_table": "contoso_gold_${env}.current_internal.dim_price_agreement_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "price_agreement_hk"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_PRICE_AGREEMENT"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "SHAREPOINT_SALES_INPUT",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_price_agreement",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_price_agreement_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "price_agreement_hk"
+    ]
   },
   {
-    "gold_entity_id": "GC_FCT_SALES_BUDGET", "source_system_id": "SHAREPOINT", "gold_layer": "CURRENT", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "fct_sales_budget",
+    "gold_entity_id": "GC_FCT_SALES_BUDGET",
+    "source_system_id": "SHAREPOINT",
+    "gold_layer": "CURRENT",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "fct_sales_budget",
     "select_sql": "SELECT sales_budget_hk, budget_month, country_code, product_category, budget_id, currency_code, budget_revenue, budget_units, forecast_revenue, forecast_units, approved_at, updated_at FROM {gold_catalog}.historical.fct_sales_budget_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["sales_budget_hk"], "scd_type": "SNAPSHOT", "partition_columns": ["budget_month"], "zorder_columns": ["country_code", "product_category"], "depends_on_gold_entity_ids": ["GH_FCT_SALES_BUDGET"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "SHAREPOINT_SALES_INPUT", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.fct_sales_budget", "staging_table": "contoso_gold_${env}.current_internal.fct_sales_budget_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "sales_budget_hk"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": [
+      "budget_month"
+    ],
+    "depends_on_gold_entity_ids": [
+      "GH_FCT_SALES_BUDGET"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "SHAREPOINT_SALES_INPUT",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.fct_sales_budget",
+    "staging_table": "contoso_gold_${env}.current_internal.fct_sales_budget_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "country_code",
+      "product_category"
+    ]
   },
   {
-    "gold_entity_id": "GH_FCT_CBS_JEUGDZORG", "source_system_id": "CBS", "gold_layer": "HISTORICAL", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "fct_cbs_jeugdzorg_hist",
+    "gold_entity_id": "GH_FCT_CBS_JEUGDZORG",
+    "source_system_id": "CBS",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "fct_cbs_jeugdzorg_hist",
     "select_sql": "SELECT h.hk_cbs_jeugdzorg AS cbs_jeugdzorg_hk, h.vorm_code, h.wijk_code, h.periode_code, s.jongeren_totaal, s.trajecten_totaal, s.gemeente_naam, s.regio_type, s.load_date AS valid_from, coalesce(s.load_end_date, timestamp'9999-12-31 23:59:59') AS valid_to, s.is_current, s.record_source FROM {vault_catalog}.raw_vault.hub_cbs_jeugdzorg h JOIN {vault_catalog}.raw_vault.sat_cbs_jeugdzorg s ON s.hk_cbs_jeugdzorg = h.hk_cbs_jeugdzorg",
-    "business_key_columns": ["cbs_jeugdzorg_hk", "valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["periode_code", "wijk_code"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "cbs_jeugdzorg_hk",
+      "valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "periode_code",
+      "wijk_code"
+    ]
   },
   {
-    "gold_entity_id": "GC_FCT_CBS_JEUGDZORG", "source_system_id": "CBS", "gold_layer": "CURRENT", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "fct_cbs_jeugdzorg",
+    "gold_entity_id": "GC_FCT_CBS_JEUGDZORG",
+    "source_system_id": "CBS",
+    "gold_layer": "CURRENT",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "fct_cbs_jeugdzorg",
     "select_sql": "SELECT cbs_jeugdzorg_hk, vorm_code, wijk_code, periode_code, jongeren_totaal, trajecten_totaal, gemeente_naam, regio_type FROM {gold_catalog}.historical.fct_cbs_jeugdzorg_hist WHERE is_current",
-    "business_key_columns": ["cbs_jeugdzorg_hk"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["periode_code", "wijk_code"], "depends_on_gold_entity_ids": ["GH_FCT_CBS_JEUGDZORG"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "CBS_JEUGDZORG_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.fct_cbs_jeugdzorg", "staging_table": "contoso_gold_${env}.current_internal.fct_cbs_jeugdzorg_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "cbs_jeugdzorg_hk"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_FCT_CBS_JEUGDZORG"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "CBS_JEUGDZORG_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.fct_cbs_jeugdzorg",
+    "staging_table": "contoso_gold_${env}.current_internal.fct_cbs_jeugdzorg_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "periode_code",
+      "wijk_code"
+    ]
   },
   {
-    "gold_entity_id": "GH_DIM_ECB_EXCHANGE_RATE", "source_system_id": "ECB", "gold_layer": "HISTORICAL", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "dim_ecb_exchange_rate_hist",
+    "gold_entity_id": "GH_DIM_ECB_EXCHANGE_RATE",
+    "source_system_id": "ECB",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "dim_ecb_exchange_rate_hist",
     "select_sql": "SELECT currency_code, rate_date, rate_to_eur, source_series, valid_from AS version_valid_from, valid_to AS version_valid_to, is_current, _record_source AS record_source FROM {vault_catalog}.business_vault.ref_ecb_exchange_rate_h",
-    "business_key_columns": ["currency_code", "rate_date", "version_valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["currency_code", "rate_date"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "currency_code",
+      "rate_date",
+      "version_valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "currency_code",
+      "rate_date"
+    ]
   },
   {
-    "gold_entity_id": "GC_DIM_ECB_EXCHANGE_RATE", "source_system_id": "ECB", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_ecb_exchange_rate",
+    "gold_entity_id": "GC_DIM_ECB_EXCHANGE_RATE",
+    "source_system_id": "ECB",
+    "gold_layer": "CURRENT",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "dim_ecb_exchange_rate",
     "select_sql": "SELECT currency_code, rate_date, rate_to_eur, source_series, version_valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_ecb_exchange_rate_hist WHERE is_current",
-    "business_key_columns": ["currency_code", "rate_date"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["currency_code", "rate_date"], "depends_on_gold_entity_ids": ["GH_DIM_ECB_EXCHANGE_RATE"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "ECB_REFERENCE_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_ecb_exchange_rate", "staging_table": "contoso_gold_${env}.current_internal.dim_ecb_exchange_rate_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "currency_code",
+      "rate_date"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_ECB_EXCHANGE_RATE"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "ECB_REFERENCE_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_ecb_exchange_rate",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_ecb_exchange_rate_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "currency_code",
+      "rate_date"
+    ]
   },
   {
-    "gold_entity_id": "GH_DIM_NAGER_HOLIDAY", "source_system_id": "NAGER", "gold_layer": "HISTORICAL", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "dim_nager_holiday_hist",
+    "gold_entity_id": "GH_DIM_NAGER_HOLIDAY",
+    "source_system_id": "NAGER",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "dim_nager_holiday_hist",
     "select_sql": "SELECT holiday_date, holiday_name, local_name, country_code, global_holiday, holiday_types, valid_from AS version_valid_from, valid_to AS version_valid_to, is_current, _record_source AS record_source FROM {vault_catalog}.business_vault.ref_nager_holidays_nl_h",
-    "business_key_columns": ["holiday_date", "country_code", "holiday_name", "version_valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["holiday_date", "country_code"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "holiday_date",
+      "country_code",
+      "holiday_name",
+      "version_valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "holiday_date",
+      "country_code"
+    ]
   },
   {
-    "gold_entity_id": "GC_DIM_NAGER_HOLIDAY", "source_system_id": "NAGER", "gold_layer": "CURRENT", "entity_type": "DIMENSION",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "dim_nager_holiday",
+    "gold_entity_id": "GC_DIM_NAGER_HOLIDAY",
+    "source_system_id": "NAGER",
+    "gold_layer": "CURRENT",
+    "entity_type": "DIMENSION",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "dim_nager_holiday",
     "select_sql": "SELECT holiday_date, holiday_name, local_name, country_code, global_holiday, holiday_types, version_valid_from AS last_changed_at FROM {gold_catalog}.historical.dim_nager_holiday_hist WHERE is_current",
-    "business_key_columns": ["holiday_date", "country_code", "holiday_name"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["holiday_date", "country_code"], "depends_on_gold_entity_ids": ["GH_DIM_NAGER_HOLIDAY"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "NAGER_REFERENCE_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.dim_nager_holiday", "staging_table": "contoso_gold_${env}.current_internal.dim_nager_holiday_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "holiday_date",
+      "country_code",
+      "holiday_name"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_DIM_NAGER_HOLIDAY"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "NAGER_REFERENCE_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.dim_nager_holiday",
+    "staging_table": "contoso_gold_${env}.current_internal.dim_nager_holiday_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "holiday_date",
+      "country_code"
+    ]
   },
   {
-    "gold_entity_id": "GH_FCT_FABRIC_SALES_ORDER_LINE", "source_system_id": "FABRIC_SALES", "gold_layer": "HISTORICAL", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "historical", "target_table": "fct_fabric_sales_order_line_hist",
+    "gold_entity_id": "GH_FCT_FABRIC_SALES_ORDER_LINE",
+    "source_system_id": "FABRIC_SALES",
+    "gold_layer": "HISTORICAL",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "historical",
+    "target_table": "fct_fabric_sales_order_line_hist",
     "select_sql": "SELECT sales_order_detail_id, order_quantity, unit_price, unit_price_discount, total_due_amount, order_status_code, source_last_modified_at, is_deleted, valid_from AS version_valid_from, valid_to AS version_valid_to, is_current, _record_source AS record_source FROM {vault_catalog}.business_vault.ref_fabric_sales_order_lines_h",
-    "business_key_columns": ["sales_order_detail_id", "version_valid_from"], "scd_type": "SCD2", "partition_columns": null, "zorder_columns": ["sales_order_detail_id", "source_last_modified_at"], "depends_on_gold_entity_ids": null, "publish_mode": "MERGE", "load_order": 10, "is_active": true
+    "business_key_columns": [
+      "sales_order_detail_id",
+      "version_valid_from"
+    ],
+    "scd_type": "SCD2",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": null,
+    "publish_mode": "MERGE",
+    "load_order": 10,
+    "is_active": true,
+    "cluster_columns": [
+      "sales_order_detail_id",
+      "source_last_modified_at"
+    ]
   },
   {
-    "gold_entity_id": "GC_FCT_FABRIC_SALES_ORDER_LINE", "source_system_id": "FABRIC_SALES", "gold_layer": "CURRENT", "entity_type": "FACT",
-    "target_catalog": "contoso_gold_${env}", "target_schema": "current", "target_table": "fct_fabric_sales_order_line",
+    "gold_entity_id": "GC_FCT_FABRIC_SALES_ORDER_LINE",
+    "source_system_id": "FABRIC_SALES",
+    "gold_layer": "CURRENT",
+    "entity_type": "FACT",
+    "target_catalog": "contoso_gold_${env}",
+    "target_schema": "current",
+    "target_table": "fct_fabric_sales_order_line",
     "select_sql": "SELECT sales_order_detail_id, order_quantity, unit_price, unit_price_discount, total_due_amount, order_status_code, source_last_modified_at FROM {gold_catalog}.historical.fct_fabric_sales_order_line_hist WHERE is_current AND NOT is_deleted",
-    "business_key_columns": ["sales_order_detail_id"], "scd_type": "SNAPSHOT", "partition_columns": null, "zorder_columns": ["sales_order_detail_id", "source_last_modified_at"], "depends_on_gold_entity_ids": ["GH_FCT_FABRIC_SALES_ORDER_LINE"], "publish_mode": "ATOMIC_SWAP", "publication_group_id": "FABRIC_SALES_MART", "publish_status": "READY", "pointer_table": "contoso_gold_${env}.current.fct_fabric_sales_order_line", "staging_table": "contoso_gold_${env}.current_internal.fct_fabric_sales_order_line_v2", "load_order": 20, "is_active": true
+    "business_key_columns": [
+      "sales_order_detail_id"
+    ],
+    "scd_type": "SNAPSHOT",
+    "partition_columns": null,
+    "depends_on_gold_entity_ids": [
+      "GH_FCT_FABRIC_SALES_ORDER_LINE"
+    ],
+    "publish_mode": "ATOMIC_SWAP",
+    "publication_group_id": "FABRIC_SALES_MART",
+    "publish_status": "READY",
+    "pointer_table": "contoso_gold_${env}.current.fct_fabric_sales_order_line",
+    "staging_table": "contoso_gold_${env}.current_internal.fct_fabric_sales_order_line_v2",
+    "load_order": 20,
+    "is_active": true,
+    "cluster_columns": [
+      "sales_order_detail_id",
+      "source_last_modified_at"
+    ]
   }
 ]

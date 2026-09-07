@@ -29,15 +29,28 @@ class GoldLoader:
         self.audit = AuditLogger(spark, ctx)
 
     # -- Gold Historisch ---------------------------------------------------
-    def load_historical(self, entity: GoldEntity) -> int:
+    def load_historical(self, entity: GoldEntity, incremental_since: str | None = None) -> int:
+        """SCD2 MERGE vanuit de vault.
+
+        `incremental_since` (ISO-datumstring) beperkt de bron-scan tot gewijzigde
+        satellietrijen. Zonder dit venster doet MERGE bij honderden tabellen een
+        full-scan per run. De vault draagt `load_date` per rij; we filteren op
+        die kolom in de subquery. Bij `None` valt de loader terug op de volledige
+        set — veilig voor kleine entiteiten en backfills.
+        """
         keys = [safe_identifier(k) for k in entity.business_key_columns]
         on_clause = " AND ".join(f"t.{k} = s.{k}" for k in keys)
+        where = (
+            f"WHERE load_date >= timestamp'{incremental_since}'"
+            if incremental_since and entity.scd_type == "SCD2"
+            else ""
+        )
         with self.audit.run("GOLD_HIST", entity.gold_entity_id) as stats:
             sql = f"""
             MERGE INTO {entity.target_table_fqn} t
             USING (
               SELECT *, '{self.ctx.batch_id}' AS _batch_id, current_timestamp() AS _loaded_at
-              FROM ({entity.select_sql})
+              FROM ({entity.select_sql}) {where}
             ) s ON {on_clause}
             WHEN NOT MATCHED THEN INSERT *
             """

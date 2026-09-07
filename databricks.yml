@@ -21,12 +21,21 @@ variables:
   bronze_parallelism:
     description: Maximale gelijktijdige Serverless Bronze-taken per bronsysteem
     default: 4
+  pipeline_parallelism:
+    description: Maximale gelijktijdige end-to-end runs voor onafhankelijke bronsystemen
+    default: 3
+  pull_schedule_pause_status:
+    description: Pauzestatus voor periodieke pull-laadjobs (PAUSED | UNPAUSED)
+    default: PAUSED
   demo_delivery_date:
     description: Datumfolder voor de handmatig gestarte demo-levering
     default: 2026-09-01
   stress_delivery_date:
     description: Datumfolder voor de handmatig gestarte stresslevering
     default: 2026-09-02
+  integration_delivery_date:
+    description: Datumfolder voor de gecombineerde actieve-bronnen acceptatierun
+    default: 2026-09-07
   service_principal:
     description: Service principal die de workflows uitvoert
     default: 22fb388c-33eb-46a3-8031-0cb4db20209d
@@ -52,6 +61,7 @@ targets:
       data_engineers_group: stoelingabob@gmail.com
       bi_analysts_group: stoelingabob@gmail.com
       data_stewards_group: stoelingabob@gmail.com
+      pull_schedule_pause_status: PAUSED
 
   tst:
     mode: production
@@ -61,6 +71,7 @@ targets:
     variables:
       env: tst
       landing_path: sales/tst
+      pull_schedule_pause_status: UNPAUSED
     run_as:
       service_principal_name: ${var.service_principal}
 
@@ -72,6 +83,7 @@ targets:
     variables:
       env: prd
       landing_path: sales/prd
+      pull_schedule_pause_status: UNPAUSED
     run_as:
       service_principal_name: ${var.service_principal}
     permissions:

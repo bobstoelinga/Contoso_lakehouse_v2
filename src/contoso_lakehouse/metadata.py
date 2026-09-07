@@ -46,6 +46,12 @@ class SourceObject:
     reference_table_fqn: str = ""
     quality_filter_expression: str | None = None
     load_order: int = 0
+    delete_semantics: str = "NONE"
+    absence_means_delete: bool = False
+    schema_contract_version: str = "1.0"
+    late_arrival_window_days: int = 30
+    freshness_sla_hours: int = 26
+    backfill_strategy: str = "FULL_RELOAD"
 
 
 @dataclass(frozen=True)
@@ -107,6 +113,8 @@ class GoldEntity:
     pointer_table: str | None = None
     staging_table: str | None = None
     source_system_id: str = "SALES"
+    partition_columns: list[str] = field(default_factory=list)
+    cluster_columns: list[str] = field(default_factory=list)
 
 
 def _as_list(value: Any) -> list[str]:
@@ -316,6 +324,8 @@ class MetadataRepository:
                 staging_table=self.settings.resolve(getattr(r, "staging_table", "")) or None,
                 depends_on_gold_entity_ids=_as_list(r.depends_on_gold_entity_ids),
                 load_order=r.load_order,
+                partition_columns=_as_list(getattr(r, "partition_columns", None)),
+                cluster_columns=_as_list(getattr(r, "cluster_columns", None)),
             )
             for r in rows
         ]

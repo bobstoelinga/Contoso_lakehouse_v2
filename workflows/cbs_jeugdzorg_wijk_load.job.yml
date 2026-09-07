@@ -5,6 +5,10 @@ resources:
       name: "[${var.env}] Contoso - Load CBS Jeugdzorg Wijk"
       description: "Extract -> Bronze -> Quality -> Raw Vault -> Gold voor CBS."
       max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 5 ? * SUN"
+        timezone_id: Europe/Amsterdam
+        pause_status: ${var.pull_schedule_pause_status}
       parameters:
         - name: delivery_date
           default: ""

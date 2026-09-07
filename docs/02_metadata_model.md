@@ -33,6 +33,8 @@ erDiagram
 | `meta_dv_entity` | Hub / Link / Satellite / PIT definities | `dv_entity_id` |
 | `meta_dv_mapping` | Kolommapping Quality → Data Vault, incl. hashdiff-scope | `dv_mapping_id` |
 | `meta_gold_entity` | Gold Historisch en Actueel, gebonden aan een bronsysteem/data product | `gold_entity_id` |
+| `meta_retry_policy` | Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in `meta_dependency` | `retry_policy_id` |
+| `meta_schema_drift_approval` | Goedkeuringsworkflow voor schema-drift per bronobject | `approval_id` |
 
 ## Audittabellen (`contoso_meta_<env>.audit`)
 
@@ -57,8 +59,19 @@ erDiagram
 | `INCREMENTAL_MERGE` | Upsert op business key | Geïmplementeerd |
 | `SNAPSHOT_SCD2` | Volledige snapshot; wijzigingen worden gehistoriseerd (Customers, Products) | Geïmplementeerd |
 | `FULL_OVERWRITE` | Volledig vervangen | Geïmplementeerd |
-| `INCREMENTAL_CDC` | Change feed met I/U/D | Openstaand |
-| `PARTIAL_SNAPSHOT` | Deelsnapshot; ontbrekende sleutels zijn géén delete | Openstaand |
+| `INCREMENTAL_CDC` | Change feed met I/U/D; deletes landen als `_cdc_op='D'` in Bronze, SCD2-resolutie downstream | Geïmplementeerd |
+| `PARTIAL_SNAPSHOT` | Deelsnapshot; ontbrekende sleutels zijn géén delete (volgt `absence_means_delete=false`) | Geïmplementeerd |
+
+### Delete-semantiek en contract (`meta_source_object`)
+
+| Veld | Betekenis |
+|---|---|
+| `delete_semantics` | `NONE` · `SOFT_DELETE_FLAG` · `HARD_DELETE` — hoe verwijderingen herkend worden |
+| `absence_means_delete` | Bij volledige snapshots: ontbrekende sleutel = delete. Alleen `true` bij gecureerde volledige sets |
+| `schema_contract_version` | Expliciet contract met de bronleverancier; drift is een contractbreuk |
+| `late_arrival_window_days` | Hoeveel dagen terug correcties nog geaccepteerd worden |
+| `freshness_sla_hours` | Verse-data-SLA voor gate-timeout en alerting |
+| `backfill_strategy` | Strategie voor initiële historische lading (`FULL_RELOAD`) |
 
 ### Verwerkingsroute (`meta_source_object.processing_route`)
 
@@ -79,6 +92,18 @@ en actuele Gold-loads verwerken uitsluitend entiteiten met dezelfde
 `source_system_id` als de actieve delivery. Een publication group mag geen
 entiteiten van meerdere bronsystemen bevatten; de metadata-validatie blokkeert
 die configuratiefout vóór uitvoering.
+
+### Fysieke organisatie (`meta_gold_entity`)
+
+| Veld | Betekenis |
+|---|---|
+| `partition_columns` | Partitie op datumkolommen voor feiten (bijv. `order_date`) — eerste orde filter |
+| `cluster_columns` | Liquid clustering op hash-keys (bijv. `customer_hk`) — incrementeel, MERGE-vriendelijk |
+
+Liquid clustering vervangt het eerdere ZORDER: bij hoge-cardinaliteit hash-keys
+en frequente MERGE's degenereert ZORDER snel en vereist dure volledige
+`OPTIMIZE`-herschikkingen. Clustering is incrementeel en blijft effectief bij
+doorlopende inserts. Kleine referentietabellen gebruiken bewust géén clustering.
 
 ### Afhankelijkheidstype (`meta_dependency.dependency_type`)
 

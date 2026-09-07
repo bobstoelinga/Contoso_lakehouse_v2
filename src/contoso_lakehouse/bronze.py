@@ -39,7 +39,7 @@ class BronzeLoader:
     def _read_stream(self, obj: SourceObject, landing_path: str) -> DataFrame:
         evolution_mode = {
             "STRICT": "failOnNewColumns",
-            "RESCUE": "rescue",
+            "RESCUE": "addNewColumns",
         }.get(obj.schema_drift_policy, obj.schema_evolution_mode)
         reader = (
             self.spark.readStream.format("cloudFiles")
@@ -94,7 +94,6 @@ class BronzeLoader:
                         delivery_id, obj.source_object_id, "FAILED", rows=rows, files=files,
                         new_columns=new_columns, error=str(exc),
                     )
-                    self.audit.refresh_delivery_status(delivery_id)
                     raise
                 self._merge_bronze_slice(obj, slice_df)
                 self.audit.set_object_status(
@@ -102,7 +101,6 @@ class BronzeLoader:
                     rows=rows, files=files,
                     new_columns=new_columns,
                 )
-                self.audit.refresh_delivery_status(delivery_id)
 
         return handler
 
@@ -110,28 +108,11 @@ class BronzeLoader:
         """Schrijft een levering volgens de metadata-gedefinieerde laadstrategie."""
         source_view = f"_bronze_{obj.source_object_id.replace('.', '_').lower()}"
         keys = [safe_identifier(column) for column in obj.business_key_columns]
-        if getattr(obj, "schema_drift_policy", "STRICT") == "RESCUE":
-            mapped = {
-                mapping.source_column
-                for mapping in self.repo.mappings(obj.source_object_id, "QUALITY")
-                if mapping.source_column
-            }
-            technical = {
-                "_delivery_id", "_delivery_date", "_source_file_path", "_source_file_name",
-                "_source_file_size", "_source_file_mtime", "_ingest_timestamp", "_batch_id",
-                "_record_source", "_rescued_data",
-            }
-            extra_columns = [column for column in slice_df.columns if column not in mapped | technical]
-            if extra_columns:
-                slice_df = slice_df.withColumn(
-                    "_rescued_data",
-                    F.to_json(F.struct(*[F.col(column) for column in extra_columns])),
-                ).drop(*extra_columns)
         dedupe_columns = ["_source_file_path", "_delivery_id", *keys]
         slice_df.dropDuplicates(dedupe_columns).createOrReplaceTempView(source_view)
         key_match = " AND ".join(f"t.{column} <=> s.{column}" for column in keys)
 
-        if obj.load_strategy in {"INCREMENTAL_APPEND", "SNAPSHOT_SCD2"}:
+        if obj.load_strategy in {"INCREMENTAL_APPEND", "SNAPSHOT_SCD2", "PARTIAL_SNAPSHOT"}:
             match_clause = (
                 "t._source_file_path = s._source_file_path\n"
                 "             AND t._delivery_id = s._delivery_id\n"
@@ -139,6 +120,14 @@ class BronzeLoader:
             )
         elif obj.load_strategy == "INCREMENTAL_MERGE":
             match_clause = key_match
+        elif obj.load_strategy == "INCREMENTAL_CDC":
+            # CDC: bron levert I/U/D. We verwachten een op-kolom; default 'I'.
+            # Deletes worden als aparte rijen met op='D' opgeslagen; de
+            # SCD2-resolutie gebeurt downstream (Quality/Vault).
+            match_clause = (
+                f"{key_match}\n"
+                "             AND t._cdc_op <=> s._cdc_op"
+            )
         elif obj.load_strategy == "FULL_OVERWRITE":
             self.spark.sql(
                 f"CREATE OR REPLACE TABLE {obj.bronze_table_fqn} AS SELECT * FROM {source_view}"
@@ -162,13 +151,15 @@ class BronzeLoader:
         )
 
     def _register(self, obj: SourceObject, delivery_id: str, df: DataFrame) -> None:
-        delivery_date = delivery_id.split("|", 1)[1]
-        expected = len(self.repo.mandatory_objects(obj.source_system_id))
-        sequence = int(datetime.strptime(delivery_date, "%Y-%m-%d").strftime("%Y%m%d"))
-        folder = df.select("_source_file_path").first()[0].rsplit("/", 1)[0]
-        self.audit.register_delivery(
-            delivery_id, obj.source_system_id, delivery_date, folder, expected, sequence
-        )
+        mandatory_objects = self.repo.mandatory_objects(obj.source_system_id)
+        registration_owner = min(item.source_object_id for item in mandatory_objects)
+        if obj.source_object_id == registration_owner:
+            delivery_date = delivery_id.split("|", 1)[1]
+            sequence = int(datetime.strptime(delivery_date, "%Y-%m-%d").strftime("%Y%m%d"))
+            folder = df.select("_source_file_path").first()[0].rsplit("/", 1)[0]
+            self.audit.register_delivery(
+                delivery_id, obj.source_system_id, delivery_date, folder, len(mandatory_objects), sequence
+            )
         self.audit.set_object_status(delivery_id, obj.source_object_id, "RUNNING")
 
     def _new_columns(self, obj: SourceObject, df: DataFrame) -> list[str]:

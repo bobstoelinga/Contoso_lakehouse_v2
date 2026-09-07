@@ -33,6 +33,11 @@ METADATA_MIGRATIONS = (
     Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "12_metadata_migrations.sql"
 )
 PIPELINE_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "pipeline.job.yml"
+CBS_LOAD_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "cbs_jeugdzorg_wijk_load.job.yml"
+ECB_LOAD_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "ecb_exchange_rates_load.job.yml"
+FABRIC_LOAD_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "fabric_sales_order_lines_load.job.yml"
+NAGER_LOAD_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "nager_holidays_nl_load.job.yml"
+ACTIVE_SOURCES_ACCEPTANCE_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "active_sources_acceptance.job.yml"
 SETUP_NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / "00_setup_lakehouse.py"
 SETUP_WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "setup.job.yml"
 CATALOGS_DDL = (
@@ -478,8 +483,30 @@ def test_bronze_loader_overwrites_only_for_full_overwrite_and_rejects_unknown_st
         "source_object_id": "SALES.CDC", "bronze_table_fqn": "bronze.cdc",
         "business_key_columns": ["id"], "load_strategy": "INCREMENTAL_CDC",
     })()
+    # CDC is nu een ondersteunde strategie: de loader mag géén ValueError geven,
+    # maar moet wel een MERGE opbouwen met de _cdc_op-kolom in de match.
+    loader._merge_bronze_slice(invalid_source, Slice())
+    cdc_statement = loader.spark.statements[-1]
+    assert "MERGE WITH SCHEMA EVOLUTION" in cdc_statement
+    assert "_cdc_op" in cdc_statement
+
+    # Een echt onbekende strategie moet nog steeds falen.
+    unknown_source = type("Source", (), {
+        "source_object_id": "SALES.UNKNOWN", "bronze_table_fqn": "bronze.unknown",
+        "business_key_columns": ["id"], "load_strategy": "TELEPORT",
+    })()
     with pytest.raises(ValueError, match="Niet-ondersteunde load_strategy"):
-        loader._merge_bronze_slice(invalid_source, Slice())
+        loader._merge_bronze_slice(unknown_source, Slice())
+
+
+def test_parallel_bronze_tasks_do_not_refresh_the_shared_delivery_row():
+    bronze_loader = (
+        Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "bronze.py"
+    ).read_text(encoding="utf-8")
+
+    assert "self.audit.refresh_delivery_status" not in bronze_loader
+    assert "registration_owner = min(item.source_object_id for item in mandatory_objects)" in bronze_loader
+    assert "if obj.source_object_id == registration_owner:" in bronze_loader
 
 
 @pytest.mark.parametrize(
@@ -531,8 +558,21 @@ def test_landing_location_is_environment_specific_and_passed_to_setup():
     assert "landing_path: ${var.landing_path}" in setup_workflow
 
 
+def test_pipeline_parallelism_is_configurable_and_keeps_source_delivery_serial():
+    bundle = BUNDLE_CONFIG.read_text(encoding="utf-8")
+    workflow = PIPELINE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "pipeline_parallelism:" in bundle
+    assert "default: 3" in bundle
+    assert "max_concurrent_runs: ${var.pipeline_parallelism}" in workflow
+    assert "chronologische, seriele verwerking binnen elk bronsysteem" in workflow
+
+
 def test_fabric_sales_schemas_and_landing_volumes_are_provisioned():
     ddl = CATALOGS_DDL.read_text(encoding="utf-8")
+    reject_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "03_quality_reject" / "31_reject_tables.sql"
+    ).read_text(encoding="utf-8")
 
     for location in (
         "raw_${env}.fabric_sales.landing",
@@ -543,6 +583,8 @@ def test_fabric_sales_schemas_and_landing_volumes_are_provisioned():
         "contoso_reject_${env}.fabric_sales",
     ):
         assert location in ddl
+    assert "CREATE TABLE IF NOT EXISTS rj_order_lines" in reject_ddl
+    assert "contoso_reject_${env}.fabric_sales.rj_order_lines" in reject_ddl
 
 
 def test_gold_consumption_requires_explicit_table_and_view_grants():
@@ -624,6 +666,65 @@ def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     assert "taskValues.set" not in bronze
 
 
+def test_standalone_load_jobs_pull_before_pipeline_processing():
+    public_api_extracts = (
+        (CBS_LOAD_WORKFLOW, "extract_cbs", "source_object_id: CBS.JEUGDZORG_WIJK_2025"),
+        (ECB_LOAD_WORKFLOW, "extract_ecb", "source_object_id: ECB.EXCHANGE_RATE"),
+        (NAGER_LOAD_WORKFLOW, "extract_nager", "source_object_id: NAGER.HOLIDAYS_NL"),
+    )
+    for workflow_path, extract_task, source_object_parameter in public_api_extracts:
+        workflow = workflow_path.read_text(encoding="utf-8")
+
+        assert "schedule:" in workflow
+        assert "pause_status: ${var.pull_schedule_pause_status}" in workflow
+        assert f"task_key: {extract_task}" in workflow
+        assert "job_id: ${resources.jobs.extract_public_api.id}" in workflow
+        assert source_object_parameter in workflow
+        assert f"depends_on: [{{ task_key: {extract_task} }}]" in workflow
+
+    fabric_workflow = FABRIC_LOAD_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "schedule:" in fabric_workflow
+    assert "pause_status: ${var.pull_schedule_pause_status}" in fabric_workflow
+    assert "task_key: extract_fabric_sql" in fabric_workflow
+    assert "notebook_path: ../notebooks/11_extract_fabric_sql.py" in fabric_workflow
+    assert "source_object_id: FABRIC_SALES.ORDER_LINES" in fabric_workflow
+    assert "depends_on: [{ task_key: extract_fabric_sql }]" in fabric_workflow
+
+
+def test_active_sources_acceptance_job_loads_all_sources_and_monitors_gold():
+    workflow = ACTIVE_SOURCES_ACCEPTANCE_WORKFLOW.read_text(encoding="utf-8")
+    monitor = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "42_monitor_active_source_gold.py"
+    ).read_text(encoding="utf-8")
+
+    for task_key in (
+        "generate_sales_delivery",
+        "load_sales_to_gold",
+        "load_cbs_to_gold",
+        "load_ecb_to_gold",
+        "load_nager_to_gold",
+        "load_fabric_sales_to_gold",
+        "monitor_active_sources_gold",
+    ):
+        assert f"task_key: {task_key}" in workflow
+
+    assert "source_system_id: SALES" in workflow
+    for job_reference in (
+        "job_id: ${resources.jobs.load_cbs_jeugdzorg_wijk.id}",
+        "job_id: ${resources.jobs.load_ecb_exchange_rates.id}",
+        "job_id: ${resources.jobs.load_nager_holidays_nl.id}",
+        "job_id: ${resources.jobs.load_fabric_sales_order_lines.id}",
+    ):
+        assert job_reference in workflow
+
+    assert "notebook_path: ../notebooks/42_monitor_active_source_gold.py" in workflow
+    assert "expected_delivery_date: \"{{job.parameters.delivery_date}}\"" in workflow
+    assert "MISSING_PUBLICATION" in monitor
+    assert "EMPTY_PUBLICATION" in monitor
+    assert "raise RuntimeError" in monitor
+
+
 def test_demo_generator_creates_files_matching_source_object_patterns():
     generator = (
         Path(__file__).resolve().parents[1] / "notebooks" / "01_generate_demo_delivery.py"
@@ -669,7 +770,9 @@ def test_stress_generator_supports_deterministic_phase_two_changes():
     assert '((F.col("id") % 100) == 0)' in generator
     assert '((F.col("id") % 200) == 0)' in generator
     assert ')).alias("is_deleted")' in generator
-    assert 'F.format_string("Customer %06d v%d", F.col("id") + 1, F.lit(change_set))' in generator
+    assert 'F.when((F.lit(change_set) > 0) & ((F.col("id") % 50) == 0), F.format_string("Customer %06d v%d", F.col("id") + 1, F.lit(change_set)))' in generator
+    assert 'F.when((F.lit(change_set) > 0) & ((F.col("id") % 100) == 0), F.lit(change_set)).otherwise(0)' in generator
+    assert 'F.when((F.lit(change_set) > 0) & ((F.col("id") % 200) == 0), F.format_string("Employee%05d v%d", F.col("id") + 1, F.lit(change_set)))' in generator
     assert "change_set: \"{{job.parameters.change_set}}\"" in workflow
 
 
@@ -727,6 +830,14 @@ def test_fabric_extractor_uses_the_service_principal_login_format():
         row for row in connector if row["source_object_id"] == "FABRIC_SALES.ORDER_LINES"
     )
     assert "authentication=ActiveDirectoryServicePrincipal" in fabric_connector["endpoint_url"]
+
+
+def test_fabric_total_due_mapping_has_a_deterministic_component_fallback():
+    mappings = _seed("meta_mapping")
+    total_due = next(row for row in mappings if row["mapping_id"] == "M-QA-FAB-05")
+
+    assert total_due["target_column"] == "total_due_amount"
+    assert "coalesce(total_due_amount, subtotal_amount + tax_amount + freight_amount)" in total_due["source_expression"]
 
 
 def test_fabric_sales_gold_is_source_bound_and_atomically_published():
@@ -937,11 +1048,12 @@ def test_source_objects_define_enterprise_metadata():
         assert obj.get("criticality") in {"LOW", "MEDIUM", "HIGH"}, obj["source_object_id"]
 
 
-def test_cbs_snapshot_preserves_unmapped_columns_in_rescue_mode():
+def test_rescue_mode_evolves_bronze_schema_without_dropping_unmapped_columns():
     cbs = next(obj for obj in _seed("meta_source_object") if obj["source_object_id"] == "CBS.JEUGDZORG_WIJK_2025")
     assert cbs["schema_drift_policy"] == "RESCUE"
     bronze_loader = (Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "bronze.py").read_text(encoding="utf-8")
-    assert 'F.to_json(F.struct(*[F.col(column) for column in extra_columns]))' in bronze_loader
+    assert '"RESCUE": "addNewColumns"' in bronze_loader
+    assert ".drop(*extra_columns)" not in bronze_loader
 
 
 def test_dependency_entries_define_priority_and_retry_policy():
@@ -1169,3 +1281,132 @@ def test_atomic_swap_promotes_one_group_release_pointer():
     assert "'TEST_MART'" in statements
     assert "'batch-1'" in statements
     assert "CREATE OR REPLACE VIEW" not in statements
+
+
+# -- Review 2026-09-07: gedragstests voor nieuwe laadstrategieen -------------
+
+
+def _bronze_slice_loader():
+    class Slice:
+        def dropDuplicates(self, columns):
+            self.dedupe_columns = columns
+            return self
+
+        def createOrReplaceTempView(self, _name):
+            pass
+
+    class RecordingSpark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+
+    loader = object.__new__(BronzeLoader)
+    loader.spark = RecordingSpark()
+    return loader, Slice()
+
+
+def test_bronze_cdc_matches_on_key_and_cdc_op():
+    loader, slice_df = _bronze_slice_loader()
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS_CDC", "bronze_table_fqn": "bronze.orders_cdc",
+        "business_key_columns": ["order_key"], "load_strategy": "INCREMENTAL_CDC",
+    })()
+
+    loader._merge_bronze_slice(source, slice_df)
+
+    statement = loader.spark.statements[-1]
+    assert "MERGE WITH SCHEMA EVOLUTION" in statement
+    assert "t._cdc_op <=> s._cdc_op" in statement
+    assert "t.order_key <=> s.order_key" in statement
+
+
+def test_bronze_partial_snapshot_uses_append_semantics_not_delete():
+    loader, slice_df = _bronze_slice_loader()
+    source = type("Source", (), {
+        "source_object_id": "SALES.PARTIAL", "bronze_table_fqn": "bronze.partial",
+        "business_key_columns": ["order_key"], "load_strategy": "PARTIAL_SNAPSHOT",
+    })()
+
+    loader._merge_bronze_slice(source, slice_df)
+
+    statement = loader.spark.statements[-1]
+    assert "MERGE WITH SCHEMA EVOLUTION" in statement
+    # append-semantiek: match op bestand + levering + sleutel, géén delete-clausule
+    assert "t._source_file_path = s._source_file_path" in statement
+    assert "t._delivery_id = s._delivery_id" in statement
+    assert "DELETE" not in statement
+
+
+def _gold_historical_loader():
+    class NoOpContextManager:
+        def __enter__(self):
+            return {}
+
+        def __exit__(self, *_args):
+            return False
+
+    class EmptyResult:
+        def collect(self):
+            return []
+
+    class RecordingSpark:
+        def __init__(self):
+            self.statements = []
+
+        def sql(self, statement):
+            self.statements.append(statement)
+            return EmptyResult()
+
+    loader = object.__new__(GoldLoader)
+    loader.spark = RecordingSpark()
+    loader.ctx = type("Context", (), {
+        "batch_id": "batch-1", "load_date_literal": "timestamp'2026-09-01 00:00:00'"
+    })()
+    loader.audit = type("Audit", (), {"run": lambda *_args: NoOpContextManager()})()
+    return loader
+
+
+def _historical_entity():
+    return GoldEntity(
+        gold_entity_id="GH_TEST", gold_layer="HISTORICAL", entity_type="DIMENSION",
+        target_table_fqn="gold.historical.dim_test", target_catalog="gold", target_schema="historical",
+        target_table="dim_test", select_sql="SELECT id, valid_from FROM vault.sat_test",
+        business_key_columns=["id", "valid_from"], scd_type="SCD2", publish_mode="MERGE",
+        publication_group_id=None, depends_on_gold_entity_ids=[], load_order=1,
+        pointer_table=None, staging_table=None,
+    )
+
+
+def test_gold_historical_incremental_window_filters_on_load_date():
+    loader = _gold_historical_loader()
+    loader.load_historical(_historical_entity(), incremental_since="2026-09-01")
+
+    statement = loader.spark.statements[0]
+    assert "WHERE load_date >= timestamp'2026-09-01'" in statement
+    assert "MERGE INTO gold.historical.dim_test" in statement
+
+
+def test_gold_historical_without_window_falls_back_to_full_scan():
+    loader = _gold_historical_loader()
+    loader.load_historical(_historical_entity())
+
+    statement = loader.spark.statements[0]
+    assert "WHERE load_date >=" not in statement
+    assert "MERGE INTO gold.historical.dim_test" in statement
+
+
+def test_orchestrator_critical_gate_blocks_only_high_criticality():
+    # Twee niet-kritieke objecten nog niet SUCCESS -> gate moet open blijven.
+    orchestrator = _orchestrator({
+        "audit_delivery_object": [type("Count", (), {"n": 0})()],
+    })
+    orchestrator.require_delivery_critical_complete("SALES|2026-09-01")
+
+    # Eén HIGH-object niet SUCCESS -> gate moet blokkeren.
+    blocking = _orchestrator({
+        "audit_delivery_object": [type("Count", (), {"n": 1})()],
+    })
+    with pytest.raises(GateNotOpenError, match="kritieke objecten"):
+        blocking.require_delivery_critical_complete("SALES|2026-09-01")

@@ -70,6 +70,10 @@ USE SCHEMA nager;
 CREATE TABLE IF NOT EXISTS rj_holidays_nl LIKE contoso_reject_${env}.sales.rj_customers;
 ALTER TABLE rj_holidays_nl SET TBLPROPERTIES (comment = 'Reject: afgekeurde Nager.Date-feestdagen, herverwerkbaar.');
 
+USE SCHEMA fabric_sales;
+CREATE TABLE IF NOT EXISTS rj_order_lines LIKE contoso_reject_${env}.sales.rj_customers;
+ALTER TABLE rj_order_lines SET TBLPROPERTIES (comment = 'Reject: afgekeurde Fabric SQL orderregels, herverwerkbaar.');
+
 -- Operationeel overzicht voor data stewards.
 CREATE OR REPLACE VIEW v_open_rejects
 COMMENT 'Alle openstaande rejects over alle bronobjecten heen.'
@@ -94,6 +98,8 @@ WITH open_rejects AS (
   SELECT * FROM contoso_reject_${env}.sharepoint.rj_sales_budgets WHERE reject_status = 'OPEN'
   UNION ALL
   SELECT * FROM contoso_reject_${env}.nager.rj_holidays_nl WHERE reject_status = 'OPEN'
+  UNION ALL
+  SELECT * FROM contoso_reject_${env}.fabric_sales.rj_order_lines WHERE reject_status = 'OPEN'
 )
 SELECT source_object_id, _delivery_id, _delivery_date, r.reason_code, r.reason_text, count(*) AS reject_count
 FROM open_rejects

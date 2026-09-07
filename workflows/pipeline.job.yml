@@ -11,7 +11,9 @@ resources:
       description: >-
         Volume -> Bronze -> gate -> Quality/Reject -> Data Vault -> Business Vault
         -> Gold Historisch -> Gold Actueel.
-      max_concurrent_runs: 1
+      # Parallel tussen onafhankelijke bronsystemen; de delivery-gate bewaakt
+      # de chronologische, seriele verwerking binnen elk bronsysteem.
+      max_concurrent_runs: ${var.pipeline_parallelism}
       timeout_seconds: 14400
 
       # Een dispatcher kan deze parameter per run zetten. Eén jobrun verwerkt

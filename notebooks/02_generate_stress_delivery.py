@@ -37,8 +37,14 @@ def widget_change_set() -> int:
     return value
 
 
-delivery_date = dbutils.widgets.get("delivery_date")
-datetime.strptime(delivery_date, "%Y-%m-%d")
+delivery_date = dbutils.widgets.get("delivery_date").strip()
+if not delivery_date:
+    delivery_date = date.today().isoformat()
+try:
+    datetime.strptime(delivery_date, "%Y-%m-%d")
+except ValueError as exc:
+    raise ValueError("delivery_date moet formaat yyyy-MM-dd hebben.") from exc
+
 business_date = datetime.strptime(dbutils.widgets.get("business_date"), "%Y-%m-%d").date()
 if business_date > date.today():
     raise ValueError("business_date mag niet in de toekomst liggen.")
@@ -56,7 +62,10 @@ landing_path = f"/Volumes/raw_{dbutils.widgets.get('env')}/sales/landing/{delive
 
 try:
     dbutils.fs.ls(landing_path)
-    raise ValueError(f"Stresslevering bestaat al en wordt niet overschreven: {landing_path}")
+    raise ValueError(
+        "Stresslevering bestaat al en wordt niet overschreven. "
+        f"Kies een nieuwe delivery_date: {landing_path}"
+    )
 except Exception as exc:
     if "FileNotFoundException" not in str(exc) and "does not exist" not in str(exc):
         raise
@@ -64,21 +73,30 @@ except Exception as exc:
 
 def write_delivery_files(df, object_name: str, file_count: int) -> None:
     temporary_path = f"{landing_path}/_staging_{object_name}"
-    df.repartition(file_count).write.mode("overwrite").parquet(temporary_path)
+    dbutils.fs.rm(temporary_path, recurse=True)
+    (
+        df.repartition(file_count)
+        .write.mode("overwrite")
+        .parquet(temporary_path)
+    )
     part_files = sorted(
         file.path for file in dbutils.fs.ls(temporary_path)
         if file.name.startswith("part-") and file.name.endswith(".parquet")
     )
-    if len(part_files) != file_count:
-        raise RuntimeError(f"{object_name}: verwacht {file_count} bestanden, kreeg {len(part_files)}.")
+    if not part_files:
+        raise RuntimeError(f"{object_name}: geen output-bestanden geschreven naar {temporary_path}.")
     for index, part_file in enumerate(part_files, start=1):
         dbutils.fs.mv(part_file, f"{landing_path}/{object_name}-{index:05d}.parquet")
     dbutils.fs.rm(temporary_path, recurse=True)
+    print(
+        f"{object_name}: {len(part_files)} bestanden geschreven "
+        f"(gevraagd: {file_count}, adaptive write kan hiervan afwijken)."
+    )
 
 
 customers = spark.range(customer_count).select(
     F.format_string("C-%06d", F.col("id") + 1).alias("customer_key"),
-    F.when(F.lit(change_set) > 0, F.format_string("Customer %06d v%d", F.col("id") + 1, F.lit(change_set)))
+    F.when((F.lit(change_set) > 0) & ((F.col("id") % 50) == 0), F.format_string("Customer %06d v%d", F.col("id") + 1, F.lit(change_set)))
      .otherwise(F.format_string("Customer %06d", F.col("id") + 1)).alias("customer_name"),
     F.format_string("customer%06d@contoso.example", F.col("id") + 1).alias("email"),
     F.format_string("+3120%07d", F.col("id") + 1).alias("phone"),
@@ -98,14 +116,14 @@ products = spark.range(product_count).select(
     F.element_at(F.array(F.lit("ELECTRONICS"), F.lit("OFFICE"), F.lit("HOME")), ((F.col("id") % 3) + 1).cast("int")).alias("product_category"),
     F.lit("STANDARD").alias("product_subcategory"), F.lit("CONTOSO").alias("brand"),
     ((F.col("id") % 500) + 10).cast("double").alias("unit_cost"),
-    ((F.col("id") % 500) + 20 + F.when(F.lit(change_set) > 0, 1).otherwise(0)).cast("double").alias("unit_price"),
+    ((F.col("id") % 500) + 20 + F.when((F.lit(change_set) > 0) & ((F.col("id") % 100) == 0), F.lit(change_set)).otherwise(0)).cast("double").alias("unit_price"),
     F.lit(False).alias("is_discontinued"),
     ((F.lit(change_set) > 0) & ((F.col("id") % 100) == 0)).alias("is_deleted"),
 )
 
 employees = spark.range(employee_count).select(
     F.format_string("E-%05d", F.col("id") + 1).alias("employee_key"),
-    F.when(F.lit(change_set) > 0, F.format_string("Employee%05d v%d", F.col("id") + 1, F.lit(change_set)))
+    F.when((F.lit(change_set) > 0) & ((F.col("id") % 200) == 0), F.format_string("Employee%05d v%d", F.col("id") + 1, F.lit(change_set)))
      .otherwise(F.format_string("Employee%05d", F.col("id") + 1)).alias("first_name"),
     F.lit("Contoso").alias("last_name"), F.lit("Sales Representative").alias("job_title"),
     F.lit("Amsterdam").alias("office_city"),

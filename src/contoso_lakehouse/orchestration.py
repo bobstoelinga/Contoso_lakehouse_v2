@@ -75,7 +75,7 @@ class Orchestrator:
             return None
         return rows[0].delivery_id if rows[0].is_ready else None
 
-    def require_delivery_complete(self, delivery_id: str) -> None:
+    def require_delivery_complete(self, delivery_id: str, critical_only: bool = False) -> None:
         row = self.spark.sql(
             f"""
             SELECT is_ready, success_count, expected_object_count, failed_count
@@ -90,6 +90,29 @@ class Orchestrator:
             raise GateNotOpenError(
                 f"Levering {delivery_id} is niet compleet: "
                 f"{r.success_count}/{r.expected_object_count} geladen, {r.failed_count} gefaald."
+            )
+
+    def require_delivery_critical_complete(self, delivery_id: str) -> None:
+        """Gate-tiering: alleen HIGH-criticality objecten moeten SUCCESS zijn.
+
+        Bij tientallen objecten blokkeert één traag, niet-kritiek object anders de
+        hele keten. Deze variant gebruikt `meta_source_object.criticality` om de
+        gate te versoepelen voor MEDIUM/LOW-objecten.
+        """
+        row = self.spark.sql(
+            f"""
+            SELECT count(*) AS n
+            FROM {self.audit_schema}.audit_delivery_object o
+            JOIN {self.ctx.settings.meta_catalog}.metadata.meta_source_object s
+              ON s.source_object_id = o.source_object_id
+            WHERE o.delivery_id = '{delivery_id}'
+              AND s.criticality = 'HIGH'
+              AND o.object_status <> 'SUCCESS'
+            """
+        ).collect()[0]
+        if row.n:
+            raise GateNotOpenError(
+                f"Levering {delivery_id}: {row.n} kritieke objecten zijn nog niet geslaagd."
             )
 
     def require_upstream_success(self, entity_id: str, layer: str) -> None:

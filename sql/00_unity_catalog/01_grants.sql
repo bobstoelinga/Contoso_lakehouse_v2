@@ -16,13 +16,14 @@ GRANT ALL PRIVILEGES ON CATALOG contoso_reject_${env}  TO `${service_principal}`
 GRANT ALL PRIVILEGES ON CATALOG contoso_vault_${env}   TO `${service_principal}`;
 GRANT ALL PRIVILEGES ON CATALOG contoso_gold_${env}    TO `${service_principal}`;
 
--- Data engineers: lezen overal, schrijven alleen in metadata-configuratie.
+-- Data engineers: lezen metadata en data; productie-mutaties lopen uitsluitend via deployment identity.
 GRANT USE CATALOG, SELECT ON CATALOG contoso_bronze_${env}  TO `${data_engineers_group}`;
 GRANT USE CATALOG, SELECT ON CATALOG contoso_quality_${env} TO `${data_engineers_group}`;
 GRANT USE CATALOG, SELECT ON CATALOG contoso_reject_${env}  TO `${data_engineers_group}`;
 GRANT USE CATALOG, SELECT ON CATALOG contoso_vault_${env}   TO `${data_engineers_group}`;
 GRANT USE CATALOG, SELECT ON CATALOG contoso_gold_${env}    TO `${data_engineers_group}`;
-GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA contoso_meta_${env}.metadata TO `${data_engineers_group}`;
+GRANT USE CATALOG, SELECT ON CATALOG contoso_meta_${env} TO `${data_engineers_group}`;
+GRANT USE SCHEMA, SELECT ON SCHEMA contoso_meta_${env}.metadata TO `${data_engineers_group}`;
 
 -- Analisten: uitsluitend Gold.
 GRANT USE CATALOG ON CATALOG contoso_gold_${env}                   TO `${bi_analysts_group}`;

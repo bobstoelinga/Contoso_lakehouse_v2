@@ -121,7 +121,9 @@ class GoldLoader:
             )
         return publication_id, count
 
-    def publish_group(self, publication_ids: dict[str, str], entities: list[GoldEntity]) -> None:
+    def publish_group(
+        self, publication_ids: dict[str, str], entities: list[GoldEntity], lease_id: str,
+    ) -> None:
         """Publiceert een publication group via één atomische releasepointer.
 
         Publieke views lezen hun slot dynamisch uit deze pointer. Daardoor is
@@ -132,33 +134,104 @@ class GoldLoader:
         ids = ", ".join(f"'{p}'" for p in publication_ids.values())
         entity_ids = ", ".join(f"'{e.gold_entity_id}'" for e in entities)
         publication_group_id = entities[0].publication_group_id or entities[0].gold_entity_id
+        lease_guard = self._lease_guard(publication_group_id, lease_id)
+        self._require_active_lease(publication_group_id, lease_id)
         self.spark.sql(
             f"""
-            MERGE INTO {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_group t
+                        UPDATE {audit} SET publication_status = 'ACTIVE', published_at = current_timestamp()
+                        WHERE publication_id IN ({ids}) AND publication_status = 'BUILDING'
+              {lease_guard}
+            """
+        )
+        self.spark.sql(
+            f"""
+                        MERGE INTO {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_group t
+                        USING (SELECT '{publication_group_id}' AS publication_group_id,
+                                                    '{self.ctx.batch_id}' AS batch_id,
+                          '{self.ctx.delivery_id}' AS delivery_id
+                   FROM {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_lease
+                   WHERE publication_group_id = '{publication_group_id}'
+                     AND lease_id = '{lease_id}'
+                     AND released_at IS NULL
+                     AND expires_at > current_timestamp()) s
+                            ON t.publication_group_id = s.publication_group_id
+                        WHEN MATCHED THEN UPDATE SET
+                            batch_id = s.batch_id,
+                            delivery_id = s.delivery_id,
+                            release_status = 'ACTIVE',
+                            published_at = current_timestamp()
+                        WHEN NOT MATCHED THEN INSERT (
+                            publication_group_id, batch_id, delivery_id, release_status, published_at)
+                        VALUES (s.publication_group_id, s.batch_id, s.delivery_id, 'ACTIVE', current_timestamp())
+            """
+        )
+        self.spark.sql(
+            f"""
+                        UPDATE {audit} SET publication_status = 'SUPERSEDED', superseded_at = current_timestamp()
+                        WHERE publication_status = 'ACTIVE' AND gold_entity_id IN ({entity_ids})
+                            AND publication_id NOT IN ({ids})
+                            {lease_guard}
+            """
+        )
+
+    def _lease_guard(self, publication_group_id: str, lease_id: str) -> str:
+        return f"""AND EXISTS (
+              SELECT 1 FROM {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_lease
+              WHERE publication_group_id = '{publication_group_id}'
+                AND lease_id = '{lease_id}'
+                AND released_at IS NULL
+                AND expires_at > current_timestamp()
+            )"""
+
+    def _require_active_lease(self, publication_group_id: str, lease_id: str) -> None:
+        row = self.spark.sql(
+            f"""
+            SELECT count(*) AS active_count
+            FROM {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_lease
+            WHERE publication_group_id = '{publication_group_id}'
+              AND lease_id = '{lease_id}'
+              AND released_at IS NULL
+              AND expires_at > current_timestamp()
+            """
+        ).collect()[0]
+        if not row.active_count:
+            raise RuntimeError(f"Lease voor publicatiegroep {publication_group_id} is niet actief.")
+
+    def _acquire_group_lease(self, publication_group_id: str) -> str:
+        """Claim exclusief een groep zodat twee runs geen slot tegelijk vervangen."""
+        lease_id = str(uuid.uuid4())
+        lease = f"{self.ctx.settings.meta_catalog}.audit.audit_gold_publication_lease"
+        self.spark.sql(
+            f"""
+            MERGE INTO {lease} t
             USING (SELECT '{publication_group_id}' AS publication_group_id,
-                          '{self.ctx.batch_id}' AS batch_id,
-                          '{self.ctx.delivery_id}' AS delivery_id) s
+                          '{lease_id}' AS lease_id,
+                          '{self.ctx.batch_id}' AS batch_id) s
               ON t.publication_group_id = s.publication_group_id
-            WHEN MATCHED THEN UPDATE SET
-              batch_id = s.batch_id,
-              delivery_id = s.delivery_id,
-              release_status = 'ACTIVE',
-              published_at = current_timestamp()
             WHEN NOT MATCHED THEN INSERT (
-              publication_group_id, batch_id, delivery_id, release_status, published_at)
-            VALUES (s.publication_group_id, s.batch_id, s.delivery_id, 'ACTIVE', current_timestamp())
+              publication_group_id, lease_id, batch_id, acquired_at, expires_at, released_at)
+            VALUES (s.publication_group_id, s.lease_id, s.batch_id, current_timestamp(),
+                    current_timestamp() + INTERVAL 4 HOURS, NULL)
+            WHEN MATCHED AND (t.released_at IS NOT NULL OR t.expires_at <= current_timestamp()) THEN UPDATE SET
+              lease_id = s.lease_id, batch_id = s.batch_id,
+              acquired_at = current_timestamp(), expires_at = current_timestamp() + INTERVAL 4 HOURS,
+              released_at = NULL
             """
         )
+        row = self.spark.sql(
+            f"""SELECT lease_id FROM {lease}
+                WHERE publication_group_id = '{publication_group_id}'"""
+        ).collect()[0]
+        if row.lease_id != lease_id:
+            raise RuntimeError(f"Publicatiegroep {publication_group_id} is al in uitvoering.")
+        return lease_id
+
+    def _release_group_lease(self, publication_group_id: str, lease_id: str) -> None:
         self.spark.sql(
             f"""
-            UPDATE {audit} SET publication_status = 'SUPERSEDED', superseded_at = current_timestamp()
-            WHERE publication_status = 'ACTIVE' AND gold_entity_id IN ({entity_ids})
-            """
-        )
-        self.spark.sql(
-            f"""
-            UPDATE {audit} SET publication_status = 'ACTIVE', published_at = current_timestamp()
-            WHERE publication_id IN ({ids}) AND publication_status = 'BUILDING'
+            UPDATE {self.ctx.settings.meta_catalog}.audit.audit_gold_publication_lease
+            SET released_at = current_timestamp(), expires_at = current_timestamp()
+            WHERE publication_group_id = '{publication_group_id}' AND lease_id = '{lease_id}'
             """
         )
 
@@ -185,15 +258,18 @@ class GoldLoader:
                 groups[entity.publication_group_id or entity.gold_entity_id].append(entity)
 
         for group, entities in groups.items():
+            lease_id = self._acquire_group_lease(group)
             publication_ids: dict[str, str] = {}
             try:
                 for entity in sorted(entities, key=lambda e: e.load_order):
                     pub_id, _ = self.build_current(entity)
                     publication_ids[entity.gold_entity_id] = pub_id
+                self.publish_group(publication_ids, entities, lease_id)
             except Exception:
                 self._mark_failed(publication_ids)
                 raise  # vorige versie blijft actief
-            self.publish_group(publication_ids, entities)
+            finally:
+                self._release_group_lease(group, lease_id)
 
     def _mark_failed(self, publication_ids: dict[str, str]) -> None:
         if not publication_ids:

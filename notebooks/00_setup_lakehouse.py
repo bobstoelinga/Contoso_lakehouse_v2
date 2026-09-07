@@ -128,11 +128,27 @@ def run_script(relative_path: str) -> None:
 
 def apply_pre_audit_migrations() -> None:
     """Voegt metadata-kolommen toe die de daaropvolgende auditviews gebruiken."""
-    table = f"{settings.meta_catalog}.metadata.meta_gold_entity"
-    existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {table}").collect()}
-    if "source_system_id" not in existing:
-        spark.sql(f"ALTER TABLE {table} ADD COLUMNS (source_system_id STRING)")
-        print(f"Gemigreerd: {table}: source_system_id STRING")
+    migrations = {
+        "metadata.meta_source_object": {
+            "delete_semantics": "STRING",
+            "absence_means_delete": "BOOLEAN",
+            "schema_contract_version": "STRING",
+            "late_arrival_window_days": "INT",
+            "freshness_sla_hours": "INT",
+            "backfill_strategy": "STRING",
+            "schema_drift_approval_required": "BOOLEAN",
+        },
+        "metadata.meta_gold_entity": {
+            "source_system_id": "STRING",
+        },
+    }
+    for relative_table, columns in migrations.items():
+        table = f"{settings.meta_catalog}.{relative_table}"
+        existing = {row.col_name.lower() for row in spark.sql(f"DESCRIBE {table}").collect()}
+        missing = [f"{name} {data_type}" for name, data_type in columns.items() if name not in existing]
+        if missing:
+            spark.sql(f"ALTER TABLE {table} ADD COLUMNS ({', '.join(missing)})")
+            print(f"Gemigreerd vóór audit-DDL: {table}: {', '.join(missing)}")
 
 
 for script in SCRIPTS:
@@ -152,7 +168,14 @@ MIGRATIONS = {
         "request_options": "MAP<STRING,STRING>",
     },
     "metadata.meta_source_object": {
+        "delete_semantics": "STRING",
+        "absence_means_delete": "BOOLEAN",
+        "schema_contract_version": "STRING",
+        "late_arrival_window_days": "INT",
+        "freshness_sla_hours": "INT",
+        "backfill_strategy": "STRING",
         "schema_drift_policy": "STRING",
+        "schema_drift_approval_required": "BOOLEAN",
         "owner_team": "STRING",
         "criticality": "STRING",
         "processing_route": "STRING",

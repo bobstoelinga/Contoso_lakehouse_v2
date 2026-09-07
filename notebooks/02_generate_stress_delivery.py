@@ -15,12 +15,19 @@ dbutils.widgets.text("employee_count", "10000")
 dbutils.widgets.text("order_count", "1000000")
 dbutils.widgets.text("return_count", "20000")
 dbutils.widgets.text("change_set", "0")
+dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
 
 # COMMAND ----------
 
+import sys
 from datetime import date, datetime
 
 from pyspark.sql import functions as F
+
+sys.path.insert(0, f"{dbutils.widgets.get('repo_root')}/src")
+
+from contoso_lakehouse.audit import AuditLogger
+from contoso_lakehouse.context import RunContext, Settings
 
 
 def widget_count(name: str) -> int:
@@ -59,6 +66,8 @@ if return_count > order_count:
     raise ValueError("return_count kan niet groter zijn dan order_count.")
 
 landing_path = f"/Volumes/raw_{dbutils.widgets.get('env')}/sales/landing/{delivery_date}"
+settings = Settings(env=dbutils.widgets.get("env"))
+audit = AuditLogger(spark, RunContext.create(settings, delivery_id=f"SALES|{delivery_date}"))
 
 try:
     dbutils.fs.ls(landing_path)
@@ -164,6 +173,21 @@ write_delivery_files(products, "products", 10)
 write_delivery_files(employees, "employees", 10)
 write_delivery_files(orders, "orders", 100)
 write_delivery_files(returns, "returns", 10)
+
+expected_objects = spark.sql(f"""
+SELECT count(*) AS n FROM {settings.meta_catalog}.metadata.meta_source_object
+WHERE source_system_id = 'SALES' AND is_active AND is_mandatory_in_delivery
+""").first().n
+dbutils.fs.put(
+    f"{landing_path}/_manifest.json",
+    "{\"delivery_id\": \"SALES|" + delivery_date
+    + "\", \"status\": \"CLOSED\", \"file_count\": 5, \"is_snapshot_complete\": true}",
+    True,
+)
+audit.close_delivery_manifest(
+    f"SALES|{delivery_date}", "SALES", f"{landing_path}/_manifest.json", expected_objects,
+    file_count=5, snapshot_complete=True,
+)
 
 print(
     f"Stresslevering geschreven naar {landing_path}: customers={customer_count}, "

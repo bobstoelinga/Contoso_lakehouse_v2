@@ -63,7 +63,114 @@ TBLPROPERTIES (
 );
 
 -- -----------------------------------------------------------------------------
--- 3. Load runs (alle lagen)
+-- 3. Leveringsmanifest (bewijs dat de bronlevering volledig is gepubliceerd)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_delivery_manifest (
+  delivery_id             STRING    NOT NULL,
+  source_system_id        STRING    NOT NULL,
+  manifest_status         STRING    NOT NULL COMMENT 'OPEN | CLOSED | INVALID',
+  manifest_path           STRING    NOT NULL,
+  expected_object_count   INT       NOT NULL,
+  expected_file_count     BIGINT    NOT NULL,
+  received_file_count     BIGINT    NOT NULL,
+  source_watermark        STRING,
+  is_snapshot_complete    BOOLEAN   NOT NULL DEFAULT false,
+  opened_at               TIMESTAMP NOT NULL,
+  closed_at               TIMESTAMP,
+  CONSTRAINT pk_delivery_manifest PRIMARY KEY (delivery_id) RELY
+)
+USING DELTA
+COMMENT 'Immutable bronverklaring dat een logische delivery volledig is gepubliceerd.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
+-- -----------------------------------------------------------------------------
+-- 4. Delivery statusovergangen (control plane, append-only)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_delivery_state_transition (
+  transition_id         STRING    NOT NULL,
+  delivery_id           STRING    NOT NULL,
+  from_status           STRING,
+  to_status             STRING    NOT NULL,
+  reason                STRING,
+  changed_by            STRING    NOT NULL,
+  approval_reference    STRING,
+  changed_at            TIMESTAMP NOT NULL,
+  CONSTRAINT pk_delivery_state_transition PRIMARY KEY (transition_id) RELY
+)
+USING DELTA
+COMMENT 'Append-only audittrail van toegestane delivery state-machineovergangen.';
+
+-- -----------------------------------------------------------------------------
+-- 5. Work-items (control-plane queue voor planner, retries en operators)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_work_item (
+  work_item_id          STRING    NOT NULL,
+  delivery_id           STRING    NOT NULL,
+  layer                 STRING    NOT NULL,
+  entity_id             STRING    NOT NULL,
+  work_status           STRING    NOT NULL COMMENT 'PENDING | RUNNING | SUCCESS | FAILED | DEAD_LETTER | SKIPPED',
+  attempt_count         INT       NOT NULL DEFAULT 0,
+  max_attempts          INT       NOT NULL,
+  next_attempt_at       TIMESTAMP NOT NULL,
+  lease_id              STRING,
+  lease_expires_at      TIMESTAMP,
+  last_error            STRING,
+  created_at            TIMESTAMP NOT NULL,
+  updated_at            TIMESTAMP NOT NULL,
+  CONSTRAINT pk_work_item PRIMARY KEY (work_item_id) RELY
+)
+USING DELTA
+COMMENT 'Persistente uitvoerqueue per delivery, laag en entiteit.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
+CREATE TABLE IF NOT EXISTS audit_work_item_transition (
+  work_item_transition_id STRING    NOT NULL,
+  work_item_id            STRING    NOT NULL,
+  delivery_id             STRING    NOT NULL,
+  layer                   STRING    NOT NULL,
+  entity_id               STRING    NOT NULL,
+  from_status             STRING    NOT NULL,
+  to_status               STRING    NOT NULL,
+  reason                  STRING    NOT NULL,
+  changed_by              STRING    NOT NULL,
+  approval_reference      STRING    NOT NULL,
+  changed_at              TIMESTAMP NOT NULL,
+  CONSTRAINT pk_work_item_transition PRIMARY KEY (work_item_transition_id) RELY
+)
+USING DELTA
+COMMENT 'Append-only operatoraudit voor work-item herstelacties.';
+
+CREATE TABLE IF NOT EXISTS audit_maintenance_run (
+  maintenance_run_id      STRING    NOT NULL,
+  dry_run                 BOOLEAN   NOT NULL,
+  started_at              TIMESTAMP NOT NULL,
+  ended_at                TIMESTAMP,
+  run_status              STRING    NOT NULL COMMENT 'RUNNING | SUCCESS | FAILED',
+  CONSTRAINT pk_maintenance_run PRIMARY KEY (maintenance_run_id) RELY
+)
+USING DELTA
+COMMENT 'Een onderhoudsplanning of uitvoering.';
+
+CREATE TABLE IF NOT EXISTS audit_maintenance_action (
+  maintenance_action_id   STRING    NOT NULL,
+  maintenance_run_id      STRING    NOT NULL,
+  table_fqn               STRING    NOT NULL,
+  policy_id               STRING    NOT NULL,
+  action_type             STRING    NOT NULL COMMENT 'OPTIMIZE | VACUUM',
+  action_status           STRING    NOT NULL COMMENT 'PLANNED | EXECUTED | SKIPPED | FAILED',
+  reason                  STRING    NOT NULL,
+  num_files               BIGINT,
+  size_in_bytes           BIGINT,
+  error_message           STRING,
+  created_at              TIMESTAMP NOT NULL,
+  completed_at            TIMESTAMP,
+  CONSTRAINT pk_maintenance_action PRIMARY KEY (maintenance_action_id) RELY
+)
+USING DELTA
+COMMENT 'Auditeerbare onderhoudsactie per Delta-tabel.';
+
+-- -----------------------------------------------------------------------------
+-- 6. Load runs (alle lagen)
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit_load_run (
   run_id                STRING    NOT NULL COMMENT 'UUID per uitgevoerde stap',
@@ -160,6 +267,22 @@ USING DELTA
 COMMENT 'Meetresultaat per kwaliteitsregel per run.'
 TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
+CREATE TABLE IF NOT EXISTS audit_reconciliation_result (
+  reconciliation_id      STRING    NOT NULL,
+  delivery_id            STRING    NOT NULL,
+  source_object_id       STRING    NOT NULL,
+  reconciliation_name    STRING    NOT NULL,
+  expected_count         BIGINT    NOT NULL,
+  actual_count           BIGINT    NOT NULL,
+  tolerance_count        BIGINT    NOT NULL DEFAULT 0,
+  reconciliation_status  STRING    NOT NULL COMMENT 'PASSED | FAILED',
+  evaluated_at           TIMESTAMP NOT NULL,
+  CONSTRAINT pk_reconciliation_result PRIMARY KEY (reconciliation_id) RELY
+)
+USING DELTA
+COMMENT 'Append-only reconciliatie tussen opeenvolgende lagen per delivery.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
 -- -----------------------------------------------------------------------------
 -- 5. Gold Actueel publicaties (publish-by-pointer)
 -- -----------------------------------------------------------------------------
@@ -193,6 +316,18 @@ CREATE TABLE IF NOT EXISTS audit_gold_publication_group (
 USING DELTA
 COMMENT 'Atomische consumer-pointer per Gold Actueel publicatiegroep.';
 
+CREATE TABLE IF NOT EXISTS audit_gold_publication_lease (
+  publication_group_id STRING    NOT NULL,
+  lease_id             STRING    NOT NULL,
+  batch_id             STRING    NOT NULL,
+  acquired_at          TIMESTAMP NOT NULL,
+  expires_at           TIMESTAMP NOT NULL,
+  released_at          TIMESTAMP,
+  CONSTRAINT pk_gold_publication_lease PRIMARY KEY (publication_group_id) RELY
+)
+USING DELTA
+COMMENT 'Exclusieve lease per publicatiegroep; voorkomt concurrerende slotwissels.';
+
 -- -----------------------------------------------------------------------------
 -- 7. Views voor de orchestratie-gates
 -- -----------------------------------------------------------------------------
@@ -201,6 +336,12 @@ COMMENT 'Atomische consumer-pointer per Gold Actueel publicatiegroep.';
 CREATE OR REPLACE VIEW v_delivery_readiness
 COMMENT 'Gate: leveringen waarvan alle verplichte bronobjecten succesvol in Bronze staan.'
 AS
+WITH snapshot_sources AS (
+  SELECT DISTINCT source_system_id
+  FROM contoso_meta_${env}.metadata.meta_source_object
+  WHERE is_active
+    AND absence_means_delete
+)
 SELECT
   d.delivery_id,
   d.source_system_id,
@@ -208,6 +349,12 @@ SELECT
   d.delivery_folder,
   d.delivery_sequence_number,
   d.expected_object_count,
+  m.manifest_status,
+  m.expected_object_count AS manifest_expected_object_count,
+  m.expected_file_count,
+  m.received_file_count,
+  m.is_snapshot_complete,
+  s.source_system_id IS NOT NULL AS requires_complete_snapshot,
   count_if(o.object_status = 'SUCCESS')                                    AS success_count,
   count_if(o.object_status = 'FAILED')                                     AS failed_count,
   count_if(o.object_status IN ('PENDING', 'RUNNING'))                      AS pending_count,
@@ -216,6 +363,8 @@ SELECT
   max(o.ended_at)                                                          AS last_object_completed_at
 FROM audit_delivery d
 LEFT JOIN audit_delivery_object o USING (delivery_id)
+LEFT JOIN audit_delivery_manifest m USING (delivery_id)
+LEFT JOIN snapshot_sources s USING (source_system_id)
 GROUP BY ALL;
 
 -- De eerstvolgende levering die verwerkt mag worden, per bronsysteem.
@@ -228,6 +377,10 @@ WITH open_deliveries AS (
   FROM v_delivery_readiness r
   JOIN audit_delivery d USING (delivery_id)
   WHERE d.delivery_status NOT IN ('QUARANTINED', 'SUPERSEDED')
+    AND r.manifest_status = 'CLOSED'
+    AND r.manifest_expected_object_count = r.expected_object_count
+    AND r.received_file_count >= r.expected_file_count
+    AND (NOT r.requires_complete_snapshot OR r.is_snapshot_complete)
     AND r.expected_object_count = (
       SELECT count(*)
       FROM contoso_meta_${env}.metadata.meta_source_object

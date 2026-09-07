@@ -11,7 +11,7 @@ Dit project realiseert een **werkend, aantoonbaar gevalideerd metadata-gedreven 
 
 De runtime en governance-laag zijn Azure Databricks, Unity Catalog en Delta Lake. Microsoft Fabric is aangesloten als werkende SQL-bron: een Fabric SQL Database wordt met JDBC uitgelezen, schrijft een immutable Parquet-levering naar het Databricks Landing Volume en wordt vervolgens door dezelfde metadata-gedreven keten verwerkt. Dit is dus geen native Fabric Lakehouse-implementatie.
 
-De kernketen en de belangrijkste foutscenario's zijn in `dev` bewezen. De Fabric Sales-delivery `FABRIC_SALES|2026-09-06` doorliep succesvol Bronze, delivery-gate, Quality, Reference Data, Gold Historisch en Gold Actueel. Een onafhankelijke read-only controle telde 542 rijen in elk van deze lagen. De lokale regressiesuite eindigde met **98 geslaagde tests**.
+De kernketen en de belangrijkste foutscenario's zijn in `dev` bewezen. De Fabric Sales-delivery `FABRIC_SALES|2026-09-06` doorliep succesvol Bronze, delivery-gate, Quality, Reference Data, Gold Historisch en Gold Actueel. Een onafhankelijke read-only controle telde 542 rijen in elk van deze lagen. De lokale regressiesuite eindigde met **131 geslaagde tests**.
 
 De oplossing is geschikt als gevalideerd architectuurprototype en als basis voor een gecontroleerde testomgeving. Productieacceptatie vereist nog bewijzen voor volume, recovery, beveiliging, governance, kosten en operationeel beheer.
 
@@ -148,7 +148,7 @@ De regressiesuite controleert onder meer hashconventies, veilige identifiers, pl
 
 ```text
 py -m pytest -q
-98 passed
+131 passed
 ```
 
 Daarnaast is lokaal geborgd dat de zelfstandige CBS-, ECB- en Fabric Sales-laadjobs
@@ -259,7 +259,7 @@ Nog openstaand (bewust niet in deze ronde): implementatie van `INCREMENTAL_CDC` 
 
 ## 13. Verwerking resterende reviewpunten — 7 september 2026 (tweede ronde)
 
-De vier bewust uitgestelde punten zijn nu alsnog doorgevoerd en getest (86/86 groen):
+De vier bewust uitgestelde punten zijn nu alsnog doorgevoerd en getest; de volledige regressiesuite staat inmiddels op 131/131 groen:
 
 - **Laadstrategieën `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT`** geïmplementeerd in [bronze.py](../src/contoso_lakehouse/bronze.py). CDC voegt `_cdc_op` toe aan de MERGE-match zodat I/U/D apart landt; SCD2-resolutie blijft downstream. PARTIAL_SNAPSHOT deelt het APPEND-pad maar respecteert `absence_means_delete=false`, zodat een deelsnapshot nooit als delete wordt geïnterpreteerd. De test die beweerde dat CDC onbekend was, is omgebouwd tot een test die het correcte MERGE-gedrag bewijst.
 - **Incrementeel venster in Gold-MERGE** in [gold.py](../src/contoso_lakehouse/gold.py): `load_historical` accepteert nu `incremental_since`; bij SCD2-entiteiten filtert de subquery op `load_date >= incremental_since`, waardoor de full-scan-per-run verdwijnt. Zonder waarde valt de loader veilig terug op de volledige set (backfill).
@@ -274,3 +274,224 @@ Correctie op paragraaf 11: Gold Actueel publiceert al atomisch per publicatiegro
 - [meta_gold_entity.json](../metadata/seed/meta_gold_entity.json): alle 23 Gold-entiteiten gebruiken `cluster_columns`; `zorder_columns` is volledig verdwenen. Feiten behouden `partition_columns` op datum; dimensies gebruiken uitsluitend clustering op hun hash-key.
 - [metadata.py](../src/contoso_lakehouse/metadata.py): `GoldEntity` draagt nu `partition_columns` en `cluster_columns`, zodat de setup-notebook de DDL metadata-gedreven kan genereren.
 - Bestaande tabellen vereisen een eenmalige `ALTER TABLE ... CLUSTER BY` of rebuild; liquid clustering werkt incrementeel en vereist daarna minder `OPTIMIZE`-onderhoud dan ZORDER.
+
+## 15. Verwerking architectuurreview — 7 september 2026 (derde ronde)
+
+De resterende aantoonbare reviewrisico's zijn in de runtime en metadata-CI verwerkt:
+
+- **Gold Actueel is gefenced per publicatiegroep.** `audit_gold_publication_lease` claimt de groep exclusief gedurende build en publicatie. De lease verloopt na vier uur en iedere zichtbaarheid-mutatie controleert het lease-id en de vervaltijd, zodat een vertraagde of geannuleerde job geen nieuwere release kan overschrijven. De nieuwe publicaties krijgen eerst status `ACTIVE`, daarna wisselt de groepspointer en pas daarna worden oude publicaties gemarkeerd als `SUPERSEDED`. Consumenten houden daardoor de vorige volledige release totdat een volledige nieuwe release klaarstaat.
+- **Schema-driftapproval is uitvoerbaar.** `ALLOW_NEW_COLUMNS_WITH_APPROVAL` leest alleen goedgekeurde `ADD_COLUMN`-records uit `meta_schema_drift_approval`; niet-goedgekeurde kolommen blokkeren Bronze. `RESCUE` blijft de expliciete policy voor technisch accepteren zonder business-publicatie.
+- **Metadata-guardrails zijn releaseblokkering.** De validator weigert ongeldige laadstrategieën, inconsequente delete-semantiek en ongeldige dependency-types. `absence_means_delete` is uitsluitend toegestaan voor `SNAPSHOT_SCD2`, zodat een deelsnapshot nooit stilzwijgend een delete veroorzaakt.
+- **Afhankelijkheden zijn runtime-semantiek.** Quality bepaalt de volgorde via topologische waves uit `meta_dependency`; `SAME_DELIVERY` controleert naast `batch_id` expliciet de delivery-id.
+
+Correctie op de review: de historische Gold-load is reeds SCD2-conform voor de bestaande entiteiten. De Gold-seeds nemen `valid_from` of `version_valid_from` op in de samengestelde business key en projecteren de historiserende, insert-only Satellite-views. Een generieke afsluit-MERGE in Gold zou dit contract dubbel toepassen en is daarom bewust niet toegevoegd.
+
+De nog noodzakelijke productieactiviteit is een schaal- en hersteltest met gelijktijdige jobs, lease-conflict, foutinjectie tussen Gold-statustransities en realistische Delta-concurrentie. De lokale regressiesuite dekt contracten en SQL-generatie, geen runtime-capaciteit of RPO/RTO.
+
+## 16. Delivery-manifest als gatecontract — 7 september 2026
+
+`audit_delivery_manifest` is toegevoegd als centrale verklaring dat een
+delivery volledig is gepubliceerd. Het contract bewaart de bron, het fysieke
+manifestpad, verwachte en ontvangen bestandsaantallen, objectaantal, optionele
+watermark en de volledigheidsverklaring voor snapshots.
+
+De chronologische delivery-gate accepteert nu alleen een `CLOSED` manifest met
+consistente aantallen. Bronnen waarvoor `absence_means_delete = true` vereisen
+daarnaast `is_snapshot_complete = true`; een deelsnapshot kan daardoor geen
+stille deletes veroorzaken. De bestaande API- en Fabric SQL-extractors sluiten
+het manifest uitsluitend na de atomische verplaatsing van staging naar Landing.
+De demo- en stressgeneratoren volgen hetzelfde patroon.
+
+Een pushend bronsysteem moet de rootfile `_manifest.json` als laatste schrijven,
+nadat alle objectbestanden voor de delivery aanwezig zijn. De volgende
+praktische productievalidatie is een run met een bewust ontbrekend bestand en
+een onvolledig manifest: de gate moet gesloten blijven en een latere delivery
+mag de chronologische wachtrij niet passeren.
+
+## 17. Generieke push-manifestregistratie — 7 september 2026
+
+De pipeline voert nu vóór de Bronze fan-out notebook 04 uit. Deze taak scant
+uitsluitend datumfolders van het geselecteerde bronsysteem en leest alleen
+rootmanifests met `status = CLOSED`. De `delivery_id` moet overeenkomen met
+bronsysteem en folderdatum; `file_count` moet ten minste het verplichte
+objectaantal dekken. Voor bronnen met snapshot-deletes is expliciet
+`is_snapshot_complete = true` vereist.
+
+Pull-extractors blijven het auditmanifest direct sluiten zodra zij hun staging
+folder atomisch publiceren. Push-bronnen schrijven daarentegen alleen het
+fysieke rootmanifest; de nieuwe generieke taak registreert dit vervolgens
+idempotent in audit. Daarmee is er voor beide aanleverpatronen een gelijk
+delivery-gatecontract zonder bronspecifieke orkestratie.
+
+## 18. Control plane: state machine en work-items — 7 september 2026
+
+Delivery-statussen worden niet langer uitsluitend in losse notebooks gewijzigd.
+`AuditLogger.transition_delivery` valideert toegestane overgangen en schrijft
+iedere actie append-only weg in `audit_delivery_state_transition`. Een
+quarantaine-vrijgave of supersede-actie vereist een reden en een
+approval-reference; de bestaande remediation-notebooks gebruiken dit contract.
+
+Voor iedere deliverygebonden Quality-, Vault- en Gold-run plant en claimt
+`AuditLogger.run` een work-item in `audit_work_item`. De queue bevat pogingnummer,
+maximale pogingen, een lease van vier uur, foutinformatie, vertraagde retry en
+`DEAD_LETTER` na uitputting van het retrybudget. Dit vormt de operationele
+backend voor een toekomstige planner en read-only operations-app. Bronze blijft
+bewust buiten deze automatische koppeling, omdat een Auto Loader-microbatch
+meerdere deliveries kan bevatten.
+
+## 19. Policy-driven Delta-onderhoud — 7 september 2026
+
+De eerdere brede maintenance-loop met een globale VACUUM-retentie is vervangen
+door `meta_table_maintenance_policy`. De Git-beheerde basispolicies scheiden
+Bronze, Quality, Reject, Vault, Gold en auditmetadata op onderhoudstier,
+interval, minimumaantal files en retentie. Auditmetadata staat standaard op
+`DISABLED` voor OPTIMIZE en behoudt een langere retentie.
+
+Notebook 90 maakt altijd een auditrecord voor de onderhoudsrun en schrijft per
+tabel een actie met `PLANNED`, `SKIPPED`, `EXECUTED` of `FAILED`. In `dry_run`
+worden alleen plannen geregistreerd. Een productie-run voert uitsluitend
+`OPTIMIZE` en `VACUUM` uit wanneer een actieve policy bestaat, de filedrempel is
+bereikt en geen succesvolle optimalisatie binnen het policy-interval bestaat.
+
+## 20. Metadata release-gate — 7 september 2026
+
+De dependency-vrije command `python -m contoso_lakehouse.release_check`
+valideert de volledige Git-seed vóór deployment. De gate controleert JSON,
+primaire sleutels, dependency-verwijzingen en minimale VACUUM-retentie. Hij
+genereert tevens de deterministische SHA-256-fingerprint van precies de release
+die later door de setup-job wordt geregistreerd.
+
+De release-check is bedoeld als eerste CI-gate. `pytest -q` levert de
+regressiedekking en notebook 99 blijft de tweede, Databricks-runtimegerichte
+gate voor `EXPLAIN`, metadataexpressies en Unity Catalog-objecten.
+
+## 21. Operationele SLO-monitoring — 7 september 2026
+
+Notebook 43 en een zelfstandige, halfuurlijkse Databricks Workflow bewaken de
+control plane. De job faalt bewust bij een manifest dat de freshness-SLA
+overschrijdt, een complete maar niet-gepubliceerde delivery, `DEAD_LETTER`
+work-items en verlopen work-item- of Gold-leases. Daardoor worden technische
+fouten niet pas zichtbaar wanneer een consument een ontbrekende Gold-release
+opmerkt.
+
+De workflow gebruikt de standaard job-alert. Operators vinden de detailstatus
+in `audit_delivery_manifest`, `audit_work_item`,
+`audit_gold_publication_lease` en de extra queries in
+`sql/01_metadata/13_monitoring_queries.sql`.
+
+## 22. Bronze-to-Quality reconciliatie — 7 september 2026
+
+Pipeline notebook 21 vergelijkt per object en delivery de gefilterde
+Bronze-invoer met het totaal van Quality en Reject. Het resultaat wordt
+append-only vastgelegd in `audit_reconciliation_result`. Een afwijking faalt
+de taak en blokkeert daardoor zowel Raw Vault als de Reference Data-route.
+
+De controle beschermt tegen stille recordverliezen door filters, retries of
+schrijffouten. Afwijkingen zijn operationeel zichtbaar via de extra query in
+`sql/01_metadata/13_monitoring_queries.sql`.
+
+## 23. Governancebeleid en least privilege — 7 september 2026
+
+`meta_data_governance_policy` koppelt ieder bronsysteem aan eigenaar, steward,
+domein, PII-classificatie, retentie, kostenplaats en SLA-tier. De lokale
+metadata release-gate weigert releases waarin een actieve bron dit contract
+mist of ongeldige classificatie-, SLA- of retentiewaarden bevat.
+
+De Unity Catalog grants geven data engineers voortaan uitsluitend leesrechten
+op metadata. Productiemutaties op metadata, Vault en Gold verlopen via de
+deployment identity. Dit voorkomt dat een ad-hoc wijziging de Git-beheerde
+metadatarelease of actieve pipelinecontracten omzeilt.
+
+## 24. Gecontroleerd dead-letter herstel — 7 september 2026
+
+Een `DEAD_LETTER` work-item kan nu via een handmatige Databricks Workflow naar
+`PENDING` worden teruggezet. De actie eist delivery, laag, entiteit, reden,
+actor en approval-reference. `audit_work_item_transition` bewaart de overgang
+append-only. Het remediationnotebook voert zelf geen data-load uit; een
+volgende pipeline-run moet de heropende stap opnieuw claimen met een nieuwe
+lease. Dit houdt herstel en uitvoering gescheiden en herleidbaar.
+
+## 25. Gold als data product — 7 september 2026
+
+`meta_gold_data_product` definieert per actuele Gold-publicatiegroep de
+productnaam, eigenaar, steward, consumptiegroep, refresh-SLA en
+compatibiliteitsbeleid. De Git-releasecheck vereist nu een geldig contract voor
+iedere actieve `CURRENT`-groep. Daardoor zijn Gold-marts niet langer alleen
+tabellen met een technische publicatie, maar expliciete data-producten met een
+afnemerscontract.
+
+## 26. Compacte Satellite current-state — 7 september 2026
+
+De Data Vault-loader gebruikt voor hashdiffvergelijking nu een compacte,
+per-satellite `__current_state`-tabel. Deze bootstrappt éénmalig uit de
+historische satellite en bewaart daarna uitsluitend de actuele hashdiff per
+hash key. De dagelijkse load vermijdt daarmee een volledige window-scan over
+de steeds groeiende `*_h`-historie. Het Data Vault-contract blijft intact:
+historische Satellites zijn append-only en Gold leest nog altijd de view met
+afgeleide `load_end_date` en `is_current`.
+
+## 27. Delta column defaults in control-plane-DDL — 7 september 2026
+
+De setup gaf `WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED` voor nieuwe
+control-plane-tabellen met kolomdefaults. Alle metadata- en audittabellen die
+`DEFAULT` gebruiken, zetten nu in hetzelfde `CREATE TABLE`-statement
+`delta.feature.allowColumnDefaults = supported`. Dit omvat manifesten,
+work-items, reconciliaties, onderhoudspolicies, governancepolicies en
+Gold-data-productcontracten. De regressiesuite controleert deze vereiste per
+tabeldefinitie.
+
+De eerste heruitvoering van de setup bracht daarnaast een statementgrensfout in
+`10_metadata_model.sql` aan het licht: onderhoudsaudittabellen stonden per
+ongeluk in de definitie van `meta_schema_drift_approval`. Dit is hersteld; de
+audittabellen staan uitsluitend in `11_audit_model.sql`. Een regressietest
+controleert voortaan deze DDL-scheiding en de afsluiting van de schema-drifttabel.
+
+## 28. Overdracht naar 8 september 2026
+
+De Databricks-authenticatie is op 7 september vernieuwd via profiel `d` voor de
+`dev`-workspace. De Asset Bundle valideerde daarna succesvol en is gedeployed
+naar:
+
+```text
+https://adb-7405619535862062.2.azuredatabricks.net
+```
+
+De eerste Databricks-setup faalde in `v_delivery_readiness`, omdat bestaande
+runtime-tabellen nog niet alle nieuwe velden van `meta_source_object` hadden.
+De auditview werd bovendien aangemaakt vóór de schema-migratie. Dit is hersteld
+door de enterprisevelden in de metadata-DDL op te nemen en de
+`apply_pre_audit_migrations` vóór het auditmodel uit te voeren. De daaropvolgende
+setup-run eindigde succesvol:
+
+```text
+Job: setup_lakehouse
+Run: 759096845348105
+Status: TERMINATED SUCCESS
+```
+
+De lokale regressiesuite is daarna opnieuw uitgevoerd met:
+
+```text
+py -m pytest -q
+131 passed
+```
+
+Een eerste end-to-end `SALES`-pipeline is gestart als run
+`356557354792392`. De run bleef ruim zes minuten in `bronze_ingest` en bereikte
+Quality, Vault en Gold niet. De run is handmatig geannuleerd en is daarom geen
+functionele failure, maar ook geen geslaagde end-to-end validatie. De parent
+Bronze-taak bevat een metadata-gestuurde `for_each_task`; de onderliggende
+objecttaken zijn daardoor nog niet afzonderlijk geanalyseerd.
+
+### Eerstvolgende actie
+
+Start de pipeline opnieuw of voer eerst een gerichte Bronze-test uit en leg per
+object de duur vast voor Serverless-opstart, Auto Loader-schema-initialisatie,
+checkpointcontrole en Delta-write/MERGE. De vermoedelijke overhead is
+Serverless cold start plus één notebooktaak per bronobject. Controleer daarna
+delivery-gate, Quality/reject, Data Vault en de atomische Gold-publicatie. Pas na
+deze succesvolle runtimeketen en een schaal-/hersteltest kan productie-readiness
+opnieuw worden beoordeeld.
+
+De lokale release-gate bleef geldig met fingerprint
+`7996f205699885cdebc7b488a9f384b2e2fac9b5688873a04c2eed1e1b6ef61a`.

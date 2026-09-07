@@ -1,0 +1,37 @@
+# Handmatige beheeractie voor gecontroleerd herplannen van een dead-letter work-item.
+resources:
+  jobs:
+    requeue_dead_letter_work_item:
+      name: "[${var.env}] Contoso - Requeue Dead Letter"
+      description: >-
+        Heropent uitsluitend een DEAD_LETTER work-item met verplichte reden,
+        actor en approval-reference.
+      max_concurrent_runs: 1
+
+      parameters:
+        - name: delivery_id
+          default: ""
+        - name: layer
+          default: ""
+        - name: entity_id
+          default: ""
+        - name: reason
+          default: ""
+        - name: approved_by
+          default: ""
+        - name: approval_reference
+          default: ""
+
+      tasks:
+        - task_key: requeue_dead_letter
+          notebook_task:
+            notebook_path: ../notebooks/12_requeue_dead_letter.py
+            base_parameters:
+              env: ${var.env}
+              delivery_id: "{{job.parameters.delivery_id}}"
+              layer: "{{job.parameters.layer}}"
+              entity_id: "{{job.parameters.entity_id}}"
+              reason: "{{job.parameters.reason}}"
+              approved_by: "{{job.parameters.approved_by}}"
+              approval_reference: "{{job.parameters.approval_reference}}"
+              repo_root: ${workspace.file_path}

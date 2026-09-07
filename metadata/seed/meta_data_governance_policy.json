@@ -1,0 +1,8 @@
+[
+  {"source_system_id": "SALES", "data_owner": "sales_domain", "data_steward": "sales_data_steward", "data_domain": "Sales", "pii_classification": "CONFIDENTIAL", "retention_days": 2555, "cost_center": "CC-SALES-DATA", "sla_tier": "CRITICAL", "is_active": true},
+  {"source_system_id": "CBS", "data_owner": "public_data_domain", "data_steward": "public_data_steward", "data_domain": "Public Data", "pii_classification": "PUBLIC", "retention_days": 2555, "cost_center": "CC-DATA-PLATFORM", "sla_tier": "BEST_EFFORT", "is_active": true},
+  {"source_system_id": "ECB", "data_owner": "reference_data_domain", "data_steward": "reference_data_steward", "data_domain": "Reference Data", "pii_classification": "PUBLIC", "retention_days": 2555, "cost_center": "CC-DATA-PLATFORM", "sla_tier": "STANDARD", "is_active": true},
+  {"source_system_id": "SHAREPOINT", "data_owner": "sales_domain", "data_steward": "sales_data_steward", "data_domain": "Sales", "pii_classification": "CONFIDENTIAL", "retention_days": 2555, "cost_center": "CC-SALES-DATA", "sla_tier": "STANDARD", "is_active": true},
+  {"source_system_id": "NAGER", "data_owner": "reference_data_domain", "data_steward": "reference_data_steward", "data_domain": "Reference Data", "pii_classification": "PUBLIC", "retention_days": 2555, "cost_center": "CC-DATA-PLATFORM", "sla_tier": "BEST_EFFORT", "is_active": true},
+  {"source_system_id": "FABRIC_SALES", "data_owner": "sales_domain", "data_steward": "sales_data_steward", "data_domain": "Sales", "pii_classification": "CONFIDENTIAL", "retention_days": 2555, "cost_center": "CC-SALES-DATA", "sla_tier": "STANDARD", "is_active": true}
+]

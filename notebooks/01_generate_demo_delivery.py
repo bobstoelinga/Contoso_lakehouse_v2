@@ -12,14 +12,22 @@ dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2
 
 # COMMAND ----------
 
+import sys
 from datetime import date, datetime
 
 from pyspark.sql import types as T
+
+sys.path.insert(0, f"{dbutils.widgets.get('repo_root')}/src")
+
+from contoso_lakehouse.audit import AuditLogger
+from contoso_lakehouse.context import RunContext, Settings
 
 delivery_date = dbutils.widgets.get("delivery_date")
 delivery_day = datetime.strptime(delivery_date, "%Y-%m-%d").date()
 business_date = min(delivery_day, date.today()).isoformat()
 landing_path = f"/Volumes/raw_{dbutils.widgets.get('env')}/sales/landing/{delivery_date}"
+settings = Settings(env=dbutils.widgets.get("env"))
+audit = AuditLogger(spark, RunContext.create(settings, delivery_id=f"SALES|{delivery_date}"))
 
 try:
     dbutils.fs.ls(landing_path)
@@ -102,4 +110,18 @@ write_delivery_file(products, product_schema, "products")
 write_delivery_file(employees, employee_schema, "employees")
 write_delivery_file(orders, order_schema, "orders")
 write_delivery_file(returns, return_schema, "returns")
+expected_objects = spark.sql(f"""
+SELECT count(*) AS n FROM {settings.meta_catalog}.metadata.meta_source_object
+WHERE source_system_id = 'SALES' AND is_active AND is_mandatory_in_delivery
+""").first().n
+dbutils.fs.put(
+    f"{landing_path}/_manifest.json",
+    "{\"delivery_id\": \"SALES|" + delivery_date
+    + "\", \"status\": \"CLOSED\", \"file_count\": 5, \"is_snapshot_complete\": true}",
+    True,
+)
+audit.close_delivery_manifest(
+    f"SALES|{delivery_date}", "SALES", f"{landing_path}/_manifest.json", expected_objects,
+    file_count=5, snapshot_complete=True,
+)
 print(f"Demo-levering geschreven naar {landing_path}")

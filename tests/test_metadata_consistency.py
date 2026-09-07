@@ -14,6 +14,7 @@ from contoso_lakehouse.bronze import BronzeLoader, SchemaDriftError
 from contoso_lakehouse.gold import GoldLoader
 from contoso_lakehouse.hashing import hash_key, hashdiff
 from contoso_lakehouse.metadata import DvEntity, GoldEntity, MetadataRepository, SourceObject
+from contoso_lakehouse.datavault import VaultLoader
 from contoso_lakehouse.orchestration import (
     DependencyCycleError,
     GateNotOpenError,
@@ -21,6 +22,8 @@ from contoso_lakehouse.orchestration import (
     parallel_execution_waves,
 )
 from contoso_lakehouse.quality import QualityBatchQuarantined, QualityEngine
+from contoso_lakehouse.reconciliation import ReconciliationResult
+from contoso_lakehouse.release_check import validate_seed_release
 from contoso_lakehouse.seed import metadata_version
 from contoso_lakehouse.sqlutil import safe_identifier
 from contoso_lakehouse.validation import MetadataValidator
@@ -75,6 +78,28 @@ def test_hashdiff_is_order_sensitive():
     assert hashdiff(["a", "b"]) != hashdiff(["b", "a"])
 
 
+def test_satellite_state_table_is_derived_from_the_physical_history_table():
+    entity = DvEntity(
+        "SAT_CUSTOMER", "SATELLITE", "RAW_VAULT", "vault.raw.sat_customer",
+        "vault.raw.sat_customer_h", "hk_customer", ["HUB_CUSTOMER"], [], "hashdiff", "'SALES'", 10,
+    )
+
+    assert VaultLoader._satellite_state_table(entity) == "vault.raw.sat_customer_h__current_state"
+
+
+def test_satellite_loader_uses_compact_current_state_for_daily_hashdiff_comparison():
+    loader = (Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "datavault.py").read_text(encoding="utf-8")
+
+    assert "__current_state" in loader
+    assert "SELECT {entity.hash_key_column}, hashdiff FROM {state}" in loader
+    assert "MERGE INTO {state} t" in loader
+
+
+def test_reconciliation_result_requires_equal_expected_and_actual_counts():
+    assert ReconciliationResult("SALES.ORDERS", 10, 10).passed
+    assert not ReconciliationResult("SALES.ORDERS", 10, 9).passed
+
+
 # -- identifiers -----------------------------------------------------------
 @pytest.mark.parametrize("value", ["contoso_gold.current.dim_customer", "hk_customer"])
 def test_safe_identifier_accepts_valid(value):
@@ -124,6 +149,50 @@ def test_metadata_version_is_deterministic_across_json_key_order():
     reordered = {"meta_source_object": [{"load_order": 10, "object_name": "orders"}]}
 
     assert metadata_version(first) == metadata_version(reordered)
+
+
+def test_local_release_check_accepts_the_complete_git_seed_release():
+    version, issues = validate_seed_release(SEED_DIR)
+
+    assert len(version) == 64
+    assert issues == []
+
+
+def test_local_release_check_reports_invalid_maintenance_retention(tmp_path):
+    for path in SEED_DIR.glob("*.json"):
+        (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    policy_path = tmp_path / "meta_table_maintenance_policy.json"
+    policies = json.loads(policy_path.read_text(encoding="utf-8"))
+    policies[0]["vacuum_retain_hours"] = 24
+    policy_path.write_text(json.dumps(policies), encoding="utf-8")
+
+    _, issues = validate_seed_release(tmp_path)
+
+    assert any("korter dan 168 uur" in issue for issue in issues)
+
+
+def test_governance_policies_cover_active_sources_and_use_valid_classifications():
+    source_systems = _seed("meta_source_system")
+    policies = {policy["source_system_id"]: policy for policy in _seed("meta_data_governance_policy")}
+    active_sources = {source["source_system_id"] for source in source_systems if source["is_active"]}
+
+    assert active_sources <= policies.keys()
+    assert {policy["pii_classification"] for policy in policies.values()} <= {
+        "PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED",
+    }
+    assert all(policy["retention_days"] > 0 for policy in policies.values())
+
+
+def test_gold_data_products_cover_active_current_publication_groups():
+    entities = _seed("meta_gold_entity")
+    products = {product["publication_group_id"]: product for product in _seed("meta_gold_data_product")}
+    current_groups = {
+        entity["publication_group_id"] for entity in entities
+        if entity["is_active"] and entity["gold_layer"] == "CURRENT" and entity.get("publication_group_id")
+    }
+
+    assert current_groups <= products.keys()
+    assert all(product["refresh_sla_hours"] > 0 for product in products.values())
 
 
 def test_parallel_execution_waves_respect_dependencies_and_worker_limit():
@@ -260,8 +329,54 @@ def test_orchestrator_requires_each_blocking_upstream_success():
         Orchestrator(spark, repo, context).require_upstream_success("SAT_CUSTOMER", "RAW_VAULT")
 
 
+def test_same_delivery_dependency_scopes_the_upstream_status_to_delivery():
+    dependency = type("Dependency", (), {
+        "dependency_type": "SAME_DELIVERY", "depends_on_entity_id": "HUB_CUSTOMER",
+        "depends_on_layer": "RAW_VAULT",
+    })()
+    repo = type("Repository", (), {"dependencies_for": lambda *_args: [dependency]})()
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "delivery_id": "SALES|2026-09-01", "batch_id": "batch-1",
+    })()
+    spark = _RecordingSpark({"v_load_run_status": [type("Count", (), {"n": 1})()]})
+
+    Orchestrator(spark, repo, context).require_upstream_success("LNK_ORDER_CUSTOMER", "RAW_VAULT")
+
+    assert "AND delivery_id = 'SALES|2026-09-01'" in spark.statements[-1]
+
+
+def test_gold_group_marks_new_publications_active_before_switching_pointer():
+    loader = object.__new__(GoldLoader)
+    loader.spark = _RecordingSpark({
+        "building_count": [type("Count", (), {"building_count": 2})()],
+        "active_count": [type("Count", (), {"active_count": 1})()],
+    })
+    loader.ctx = type("Context", (), {
+        "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "SALES|2026-09-01",
+    })()
+    entities = [
+        GoldEntity("GC_CUSTOMER", "CURRENT", "DIMENSION", "gold.current.customer", "gold", "current",
+                   "customer", "SELECT 1", ["id"], "SNAPSHOT", "ATOMIC_SWAP", "SALES_MART", [], 1),
+        GoldEntity("GC_SALES", "CURRENT", "FACT", "gold.current.sales", "gold", "current", "sales",
+                   "SELECT 1", ["id"], "SNAPSHOT", "ATOMIC_SWAP", "SALES_MART", [], 2),
+    ]
+
+    loader.publish_group(
+        {"GC_CUSTOMER": "pub-customer", "GC_SALES": "pub-sales"}, entities, "lease-1"
+    )
+
+    statements = loader.spark.statements
+    assert "SET publication_status = 'ACTIVE'" in statements[2]
+    assert "MERGE INTO contoso_meta_tst.audit.audit_gold_publication_group" in statements[3]
+    assert "expires_at > current_timestamp()" in statements[3]
+    assert "SET publication_status = 'SUPERSEDED'" in statements[4]
+
+
 def test_audit_run_records_failure_and_preserves_the_original_exception():
-    spark = _RecordingSpark({"audit_metadata_version": [type("Version", (), {"metadata_version": "metadata-v1"})()]})
+    spark = _RecordingSpark({
+        "audit_metadata_version": [type("Version", (), {"metadata_version": "metadata-v1"})()],
+        "SELECT lease_id": [type("Lease", (), {"lease_id": "lease-1"})()],
+    })
     context = type("Context", (), {
         "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "SALES|2026-09-01",
         "load_date_literal": "timestamp'2026-09-01 00:00:00.000'", "job_run_id": "job-1"
@@ -275,6 +390,7 @@ def test_audit_run_records_failure_and_preserves_the_original_exception():
     assert "'RUNNING'" in statements
     assert "'FAILED'" in statements
     assert "expected failure" in statements
+    assert "audit_work_item" in statements
 
 
 def test_audit_logger_quarantines_a_delivery_with_its_reason():
@@ -284,12 +400,86 @@ def test_audit_logger_quarantines_a_delivery_with_its_reason():
         "load_date_literal": "timestamp'2026-09-01 00:00:00.000'", "job_run_id": "job-1"
     })()
 
+    spark.rows_by_fragment["SELECT delivery_status"] = [type("Delivery", (), {"delivery_status": "IN_PROGRESS"})()]
     AuditLogger(spark, context).quarantine_delivery("SALES|2026-09-01", "DQ threshold exceeded")
 
-    statement = spark.statements[-1]
+    statement = spark.statements[-2]
     assert "delivery_status = 'QUARANTINED'" in statement
     assert "quarantine_reason = 'DQ threshold exceeded'" in statement
     assert "delivery_id = 'SALES|2026-09-01'" in statement
+
+
+def test_delivery_state_machine_rejects_invalid_transition_and_audits_valid_transition():
+    spark = _RecordingSpark({"SELECT delivery_status": [
+        type("Delivery", (), {"delivery_status": "IN_PROGRESS"})()
+    ]})
+    context = type("Context", (), {"settings": Settings(env="tst")})()
+    audit = AuditLogger(spark, context)
+
+    audit.transition_delivery("SALES|2026-09-01", "COMPLETE", "operator", "Validated")
+    assert "audit_delivery_state_transition" in spark.statements[-1]
+    assert "'IN_PROGRESS'" in spark.statements[-1]
+    assert "'COMPLETE'" in spark.statements[-1]
+
+    with pytest.raises(ValueError, match="Niet-toegestane"):
+        audit.transition_delivery("SALES|2026-09-01", "DETECTED", "operator")
+
+    with pytest.raises(ValueError, match="vereist reden en approval_reference"):
+        audit.transition_delivery("SALES|2026-09-01", "SUPERSEDED", "operator")
+
+
+def test_work_item_control_plane_plans_claims_and_finishes_with_a_lease():
+    spark = _RecordingSpark({"SELECT lease_id": [type("Lease", (), {"lease_id": "any"})()]})
+    audit = AuditLogger(spark, type("Context", (), {"settings": Settings(env="tst")})())
+
+    audit.plan_work_item("SALES|2026-09-01", "QUALITY", "SALES.ORDERS")
+    lease_id = audit.claim_work_item("SALES|2026-09-01", "QUALITY", "SALES.ORDERS")
+    audit.finish_work_item(lease_id, succeeded=False, error="temporary failure")
+
+    statements = "\n".join(spark.statements)
+    assert "audit_work_item" in statements
+    assert "attempt_count = t.attempt_count + 1" in statements
+    assert "INTERVAL 4 HOURS" in statements
+    assert "DEAD_LETTER" in statements
+    with pytest.raises(ValueError, match="minimaal 1"):
+        audit.plan_work_item("SALES|2026-09-01", "QUALITY", "SALES.ORDERS", max_attempts=0)
+
+
+def test_dead_letter_requeue_requires_approval_and_writes_transition_audit():
+    spark = _RecordingSpark({"SELECT work_item_id": [
+        type("WorkItem", (), {"work_item_id": "work-1", "work_status": "DEAD_LETTER"})()
+    ]})
+    audit = AuditLogger(spark, type("Context", (), {"settings": Settings(env="tst")})())
+
+    audit.requeue_dead_letter(
+        "SALES|2026-09-01", "QUALITY", "SALES.ORDERS", "operator", "Source corrected", "CHG-123"
+    )
+
+    statements = "\n".join(spark.statements)
+    assert "work_status = 'PENDING'" in statements
+    assert "audit_work_item_transition" in statements
+    assert "'CHG-123'" in statements
+    with pytest.raises(ValueError, match="verplicht"):
+        audit.requeue_dead_letter("SALES|2026-09-01", "QUALITY", "SALES.ORDERS", "", "", "")
+
+
+def test_audit_logger_closes_a_delivery_manifest_after_atomic_publication():
+    spark = _RecordingSpark()
+    context = type("Context", (), {
+        "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "SALES|2026-09-01",
+        "load_date_literal": "timestamp'2026-09-01 00:00:00.000'", "job_run_id": "job-1",
+    })()
+
+    AuditLogger(spark, context).close_delivery_manifest(
+        "SALES|2026-09-01", "SALES", "/Volumes/raw_tst/sales/landing/2026-09-01/_manifest.json",
+        expected_objects=3, file_count=4, snapshot_complete=True, source_watermark="run-42",
+    )
+
+    statement = spark.statements[-1]
+    assert "audit_delivery_manifest" in statement
+    assert "'CLOSED'" in statement
+    assert "is_snapshot_complete" in statement
+    assert "'run-42'" in statement
 
 
 def test_quality_retries_replace_outputs_only_for_the_same_delivery_and_source_object():
@@ -326,6 +516,7 @@ def test_metadata_validator_reports_invalid_metadata_without_stopping_at_first_i
         "source_objects": lambda *_args: (source,), "mappings": lambda *_args: [],
         "quality_rules": lambda *_args: [], "dv_entities": lambda *_args: (),
         "gold_entities": lambda *_args: (entity,),
+        "dependencies": lambda *_args: (),
     })()
     spark = _RecordingSpark()
     validator = MetadataValidator(spark, repo, Settings(env="tst"))
@@ -340,6 +531,32 @@ def test_metadata_validator_reports_invalid_metadata_without_stopping_at_first_i
     assert "publication_group_id" in messages
     assert "pointer_table" in messages
     assert "staging_table" in messages
+
+
+def test_metadata_validator_rejects_invalid_snapshot_and_delete_contracts():
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS", "load_strategy": "PARTIAL_SNAPSHOT",
+        "delete_semantics": "SNAPSHOT_ABSENCE", "absence_means_delete": True,
+        "deleted_flag_column": None,
+    })()
+    repo = type("Repository", (), {"source_objects": lambda *_args: (source,)})()
+    validator = MetadataValidator(_RecordingSpark(), repo, Settings(env="tst"))
+
+    issues = validator.validate_source_objects()
+
+    assert "absence_means_delete vereist SNAPSHOT_SCD2" in issues[0].message
+
+
+def test_approved_schema_drift_columns_are_accepted():
+    loader = object.__new__(BronzeLoader)
+    loader.repo = type("Repository", (), {
+        "schema_drift_is_approved": lambda *_args: True,
+    })()
+    source = type("Source", (), {
+        "source_object_id": "SALES.ORDERS", "schema_drift_policy": "ALLOW_NEW_COLUMNS_WITH_APPROVAL",
+    })()
+
+    loader._validate_schema_drift(source, ["new_attribute"])
 
 
 def test_historical_gold_merge_inserts_only_new_scd2_versions():
@@ -514,13 +731,16 @@ def test_parallel_bronze_tasks_do_not_refresh_the_shared_delivery_row():
     [
         ("RESCUE", ["new_attribute"], None),
         ("STRICT", ["new_attribute"], "STRICT"),
-        ("ALLOW_NEW_COLUMNS_WITH_APPROVAL", ["new_attribute"], "mappinggoedkeuring"),
+        ("ALLOW_NEW_COLUMNS_WITH_APPROVAL", ["new_attribute"], "schema-driftgoedkeuring"),
         ("UNDEFINED", ["new_attribute"], "onbekend schema_drift_policy"),
         ("STRICT", [], None),
     ],
 )
 def test_bronze_schema_drift_policy_is_enforced_before_merge(policy, columns, expected_error):
     loader = object.__new__(BronzeLoader)
+    loader.repo = type("Repository", (), {
+        "schema_drift_is_approved": lambda *_args: False,
+    })()
     source = type("Source", (), {"source_object_id": "SALES.ORDERS", "schema_drift_policy": policy})()
 
     if expected_error:
@@ -534,7 +754,9 @@ def test_metadata_ddl_includes_seeded_enterprise_fields():
     ddl = METADATA_DDL.read_text(encoding="utf-8")
     setup = SETUP_NOTEBOOK.read_text(encoding="utf-8")
     for field in (
-        "schema_drift_policy", "owner_team", "criticality",
+        "delete_semantics", "absence_means_delete", "schema_contract_version",
+        "late_arrival_window_days", "freshness_sla_hours", "backfill_strategy",
+        "schema_drift_approval_required", "schema_drift_policy", "owner_team", "criticality",
         "priority", "retry_policy", "max_retries",
         "is_blocking", "rule_group",
         "publish_status", "pointer_table", "staging_table",
@@ -542,6 +764,64 @@ def test_metadata_ddl_includes_seeded_enterprise_fields():
         assert field in ddl, field
         assert field in setup, field
     assert "ALTER TABLE {fqn} ADD COLUMNS" in setup
+
+
+def test_delta_tables_with_defaults_enable_the_column_defaults_feature():
+    metadata_ddl = METADATA_DDL.read_text(encoding="utf-8")
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+
+    for table in (
+        "meta_table_maintenance_policy", "meta_data_governance_policy", "meta_gold_data_product",
+    ):
+        definition = metadata_ddl.split(f"CREATE TABLE IF NOT EXISTS {table}", 1)[1].split(
+            "CREATE TABLE IF NOT EXISTS", 1
+        )[0]
+        assert "delta.feature.allowColumnDefaults" in definition
+
+
+def test_metadata_and_audit_ddl_keep_schema_drift_and_maintenance_statements_separate():
+    metadata_ddl = METADATA_DDL.read_text(encoding="utf-8")
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+    schema_drift_definition = metadata_ddl.split(
+        "CREATE TABLE IF NOT EXISTS meta_schema_drift_approval", 1
+    )[1].split("CREATE TABLE IF NOT EXISTS meta_dependency", 1)[0]
+
+    assert "REFERENCES meta_source_object(source_object_id) RELY\n)\nUSING DELTA" in schema_drift_definition
+    assert "CREATE TABLE IF NOT EXISTS audit_maintenance_run" not in metadata_ddl
+    assert "CREATE TABLE IF NOT EXISTS audit_maintenance_run" in audit_ddl
+    for table in ("audit_delivery_manifest", "audit_work_item", "audit_reconciliation_result"):
+        definition = audit_ddl.split(f"CREATE TABLE IF NOT EXISTS {table}", 1)[1].split(
+            "CREATE TABLE IF NOT EXISTS", 1
+        )[0]
+        assert "delta.feature.allowColumnDefaults" in definition
+
+
+def test_maintenance_policies_are_seeded_and_have_safe_retention():
+    policies = _seed("meta_table_maintenance_policy")
+    assert {policy["catalog_name"] for policy in policies} >= {
+        "contoso_bronze_${env}", "contoso_quality_${env}", "contoso_vault_${env}",
+        "contoso_gold_${env}", "contoso_meta_${env}", "contoso_reject_${env}",
+    }
+    assert all(policy["vacuum_retain_hours"] >= 168 for policy in policies)
+    assert any(policy["maintenance_tier"] == "AUDIT" and policy["optimize_mode"] == "DISABLED"
+               for policy in policies)
+
+
+def test_maintenance_is_policy_driven_auditable_and_supports_dry_run():
+    notebook = (Path(__file__).resolve().parents[1] / "notebooks" / "90_maintenance.py").read_text(encoding="utf-8")
+    workflow = (Path(__file__).resolve().parents[1] / "workflows" / "maintenance.job.yml").read_text(encoding="utf-8")
+
+    for required in (
+        "meta_table_maintenance_policy", "audit_maintenance_run", "audit_maintenance_action",
+        "dry_run", "DESCRIBE DETAIL", "min_files_before_optimize", "Policy due", "Policy disabled",
+    ):
+        assert required in notebook
+    assert "vacuum_retain_hours" not in workflow
+    assert 'dry_run: "false"' in workflow
 
 
 def test_landing_location_is_environment_specific_and_passed_to_setup():
@@ -616,13 +896,15 @@ def test_delivery_supersede_is_auditable_and_requires_approval():
     remediation = (
         Path(__file__).resolve().parents[1] / "notebooks" / "07_supersede_delivery.py"
     ).read_text(encoding="utf-8")
+    audit = (Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "audit.py").read_text(encoding="utf-8")
 
     for field in ("superseded_at", "superseded_by", "supersede_reason", "supersede_approval_reference"):
         assert field in audit_ddl
-        assert field in remediation
+        assert field in audit
     assert "audit_gold_publication_group" in remediation
     assert "g.release_status = 'ACTIVE'" in remediation
     assert "if row.gold_published:" in remediation
+    assert 'audit.transition_delivery(' in remediation
     assert 'sys.path.insert(0, f"{dbutils.widgets.get(\'repo_root\')}/src")' in remediation
 
 
@@ -636,14 +918,15 @@ def test_quarantine_release_is_auditable_and_limited_to_quarantined_deliveries()
     workflow = (
         Path(__file__).resolve().parents[1] / "workflows" / "quarantine_remediation.job.yml"
     ).read_text(encoding="utf-8")
+    audit = (Path(__file__).resolve().parents[1] / "src" / "contoso_lakehouse" / "audit.py").read_text(encoding="utf-8")
 
     for field in ("quarantined_at", "quarantine_reason"):
         assert field in audit_ddl
     for field in ("released_at", "released_by", "release_reason", "release_approval_reference"):
         assert field in audit_ddl
-        assert field in release
+        assert field in audit
     assert 'row.delivery_status != "QUARANTINED"' in release
-    assert "AND delivery_status = 'QUARANTINED'" in release
+    assert 'audit.transition_delivery(' in release
     assert "release_quarantined_delivery" in workflow
 
 
@@ -657,6 +940,9 @@ def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     ).read_text(encoding="utf-8")
 
     assert "task_key: plan_bronze_fanout" in workflow
+    assert "task_key: register_delivery_manifests" in workflow
+    assert "notebook_path: ../notebooks/04_register_delivery_manifests.py" in workflow
+    assert "depends_on: [{ task_key: register_delivery_manifests }]" in workflow
     assert "for_each_task:" in workflow
     assert "{{tasks.plan_bronze_fanout.values.bronze_inputs}}" in workflow
     assert "concurrency: ${var.bronze_parallelism}" in workflow
@@ -664,6 +950,19 @@ def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     assert 'source_system_id: "{{job.parameters.source_system_id}}"' in workflow
     assert "currentRunId" not in planner
     assert "taskValues.set" not in bronze
+
+
+def test_pipeline_reconciles_quality_before_vault_processing():
+    workflow = PIPELINE_WORKFLOW.read_text(encoding="utf-8")
+    notebook = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "21_reconcile_quality.py"
+    ).read_text(encoding="utf-8")
+
+    assert "task_key: reconcile_quality" in workflow
+    assert "notebook_path: ../notebooks/21_reconcile_quality.py" in workflow
+    assert "depends_on: [{ task_key: reconcile_quality }]" in workflow
+    assert "ReconciliationEngine" in notebook
+    assert "expected_count" in notebook
 
 
 def test_standalone_load_jobs_pull_before_pipeline_processing():
@@ -725,6 +1024,38 @@ def test_active_sources_acceptance_job_loads_all_sources_and_monitors_gold():
     assert "raise RuntimeError" in monitor
 
 
+def test_operations_monitor_covers_control_plane_slo_breaches():
+    monitor = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "43_monitor_operations.py"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        Path(__file__).resolve().parents[1] / "workflows" / "operations_monitoring.job.yml"
+    ).read_text(encoding="utf-8")
+
+    for breach_type in (
+        "MANIFEST_SLA", "DELIVERY_SLA", "DEAD_LETTER", "EXPIRED_WORK_LEASE", "EXPIRED_GOLD_LEASE",
+    ):
+        assert breach_type in monitor
+    assert "raise RuntimeError" in monitor
+    assert "task_key: monitor_operations" in workflow
+    assert "notebook_path: ../notebooks/43_monitor_operations.py" in workflow
+
+
+def test_dead_letter_remediation_workflow_requires_approval_context():
+    notebook = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "12_requeue_dead_letter.py"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        Path(__file__).resolve().parents[1] / "workflows" / "work_item_remediation.job.yml"
+    ).read_text(encoding="utf-8")
+
+    for value in ("delivery_id", "layer", "entity_id", "reason", "approved_by", "approval_reference"):
+        assert value in notebook
+        assert f"name: {value}" in workflow
+    assert "audit.requeue_dead_letter(" in notebook
+    assert "task_key: requeue_dead_letter" in workflow
+
+
 def test_demo_generator_creates_files_matching_source_object_patterns():
     generator = (
         Path(__file__).resolve().parents[1] / "notebooks" / "01_generate_demo_delivery.py"
@@ -733,6 +1064,36 @@ def test_demo_generator_creates_files_matching_source_object_patterns():
     assert "dbutils.fs.mv(part_file" in generator
     for object_name in ("customers", "products", "employees", "orders", "returns"):
         assert f'write_delivery_file({object_name}' in generator
+    assert "audit.close_delivery_manifest(" in generator
+    assert 'f"{landing_path}/_manifest.json"' in generator
+    assert "sys.path.insert(0" in generator
+    assert '"is_snapshot_complete\\": true' in generator
+
+
+def test_manifest_registration_validates_closed_push_manifests_before_bronze():
+    manifest_notebook = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "04_register_delivery_manifests.py"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "_manifest.json", "manifest.get(\"status\") != \"CLOSED\"",
+        "is_snapshot_complete", "audit.close_delivery_manifest(", "file_count",
+    ):
+        assert required in manifest_notebook
+
+
+def test_pull_extractors_close_a_central_delivery_manifest_after_publish():
+    public_api = (Path(__file__).resolve().parents[1] / "notebooks" / "09_extract_public_api.py").read_text(encoding="utf-8")
+    fabric = (Path(__file__).resolve().parents[1] / "notebooks" / "11_extract_fabric_sql.py").read_text(encoding="utf-8")
+
+    for extractor in (public_api, fabric):
+        assert "dbutils.fs.mv(staging, target, True)" in extractor
+        assert "audit.close_delivery_manifest(" in extractor
+        assert "snapshot_complete=row.load_strategy == \"SNAPSHOT_SCD2\"" in extractor
+
+    stress = (Path(__file__).resolve().parents[1] / "notebooks" / "02_generate_stress_delivery.py").read_text(encoding="utf-8")
+    assert "repo_root" in stress
+    assert "sys.path.insert(0" in stress
 
 
 def test_demo_generator_keeps_business_dates_valid_for_future_delivery_folders():
@@ -803,7 +1164,9 @@ def test_setup_migrates_gold_source_before_creating_audit_views():
     ).read_text(encoding="utf-8")
 
     assert "def apply_pre_audit_migrations()" in setup
-    assert "ALTER TABLE {table} ADD COLUMNS (source_system_id STRING)" in setup
+    assert '"metadata.meta_source_object"' in setup
+    assert '"schema_contract_version": "STRING"' in setup
+    assert '"metadata.meta_gold_entity"' in setup
     assert 'if script == "sql/01_metadata/10_metadata_model.sql":' in setup
 
 
@@ -902,7 +1265,7 @@ def test_quarantined_deliveries_are_not_selected_by_the_next_delivery_gate():
     ).read_text(encoding="utf-8")
 
     assert "delivery_status NOT IN ('QUARANTINED', 'SUPERSEDED')" in audit_ddl
-    assert "SET delivery_status = 'QUARANTINED'" in audit
+    assert 'transition_delivery(delivery_id, "QUARANTINED", "system", reason)' in audit
 
 
 def test_bronze_loader_avoids_serverless_unsupported_persistence():
@@ -1151,6 +1514,8 @@ def test_atomic_swap_publication_uses_configured_pointer_and_activates_build():
             self.statements.append(statement)
             if "building_count" in statement:
                 return BuildingPublicationResult()
+            if "active_count" in statement:
+                return type("ActiveLeaseResult", (), {"collect": lambda _: [type("Count", (), {"active_count": 1})()]})()
             return EmptyResult()
 
     entity = GoldEntity(
@@ -1177,7 +1542,7 @@ def test_atomic_swap_publication_uses_configured_pointer_and_activates_build():
         "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "delivery-1"
     })()
 
-    loader.publish_group({"GC_TEST": "publication-1"}, [entity])
+    loader.publish_group({"GC_TEST": "publication-1"}, [entity], "lease-1")
 
     statements = "\n".join(loader.spark.statements)
     assert "publication_status = 'BUILDING'" in statements
@@ -1224,7 +1589,7 @@ def test_atomic_swap_refuses_incomplete_publication_group_before_pointer_switch(
     loader.ctx = type("Context", (), {"settings": Settings(env="tst")})()
 
     with pytest.raises(RuntimeError, match="BUILDING-publicaties"):
-        loader.publish_group({"GC_TEST": "publication-1"}, [entity])
+        loader.publish_group({"GC_TEST": "publication-1"}, [entity], "lease-1")
 
     statements = "\n".join(loader.spark.statements)
     assert "CREATE OR REPLACE VIEW" not in statements
@@ -1247,6 +1612,8 @@ def test_atomic_swap_promotes_one_group_release_pointer():
             self.statements.append(statement)
             if "physical_slot" in statement:
                 return EmptyResult()
+            if "active_count" in statement:
+                return type("ActiveLeaseResult", (), {"collect": lambda _: [type("Count", (), {"active_count": 1})()]})()
             return BuildingPublicationResult()
 
     entity = GoldEntity(
@@ -1273,7 +1640,7 @@ def test_atomic_swap_promotes_one_group_release_pointer():
         "settings": Settings(env="tst"), "batch_id": "batch-1", "delivery_id": "delivery-1"
     })()
 
-    loader.publish_group({"GC_TEST": "publication-1"}, [entity])
+    loader.publish_group({"GC_TEST": "publication-1"}, [entity], "lease-1")
 
     statements = "\n".join(loader.spark.statements)
     assert "audit_gold_publication_group" in statements

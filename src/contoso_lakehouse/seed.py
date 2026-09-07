@@ -17,26 +17,32 @@ from contoso_lakehouse.context import Settings
 
 _SEED_FILES = {
     "meta_source_system": "meta_source_system.json",
+    "meta_data_governance_policy": "meta_data_governance_policy.json",
     "meta_source_connector": "meta_source_connector.json",
     "meta_source_object": "meta_source_object.json",
+        "meta_table_maintenance_policy": "meta_table_maintenance_policy.json",
     "meta_dependency": "meta_dependency.json",
     "meta_quality_rule": "meta_quality_rule.json",
     "meta_mapping": "meta_mapping.json",
     "meta_dv_entity": "meta_dv_entity.json",
     "meta_dv_mapping": "meta_dv_mapping.json",
     "meta_gold_entity": "meta_gold_entity.json",
+    "meta_gold_data_product": "meta_gold_data_product.json",
 }
 
 _KEY_COLUMNS = {
     "meta_source_system": "source_system_id",
+    "meta_data_governance_policy": "source_system_id",
     "meta_source_connector": "source_object_id",
     "meta_source_object": "source_object_id",
+        "meta_table_maintenance_policy": "policy_id",
     "meta_dependency": "dependency_id",
     "meta_quality_rule": "rule_id",
     "meta_mapping": "mapping_id",
     "meta_dv_entity": "dv_entity_id",
     "meta_dv_mapping": "dv_mapping_id",
     "meta_gold_entity": "gold_entity_id",
+    "meta_gold_data_product": "publication_group_id",
 }
 
 

@@ -58,9 +58,16 @@ CREATE TABLE IF NOT EXISTS meta_source_object (
   business_key_columns  ARRAY<STRING> NOT NULL COMMENT 'Natuurlijke sleutel in de bron',
   change_tracking_columns ARRAY<STRING> COMMENT 'Kolommen die een wijziging aanduiden (hashdiff-scope)',
   deleted_flag_column   STRING              COMMENT 'Kolom die een logische delete markeert',
+  delete_semantics      STRING    NOT NULL DEFAULT 'NONE' COMMENT 'NONE | SOFT_DELETE_FLAG | SNAPSHOT_ABSENCE | CDC_TOMBSTONE',
+  absence_means_delete  BOOLEAN   NOT NULL DEFAULT false COMMENT 'Een ontbrekende sleutel in een complete snapshot is een delete',
+  schema_contract_version STRING  NOT NULL DEFAULT '1.0',
+  late_arrival_window_days INT    NOT NULL DEFAULT 30,
+  freshness_sla_hours   INT       NOT NULL DEFAULT 26,
+  backfill_strategy     STRING    NOT NULL DEFAULT 'FULL_RELOAD' COMMENT 'FULL_RELOAD | REPLAY_FROM_LANDING | REPROCESS_FROM_BRONZE',
   is_mandatory_in_delivery BOOLEAN NOT NULL DEFAULT true COMMENT 'Blokkeert de leverings-gate indien afwezig',
   schema_drift_policy   STRING    NOT NULL DEFAULT 'STRICT'
                         COMMENT 'STRICT | ALLOW_NEW_COLUMNS_WITH_APPROVAL | RESCUE',
+  schema_drift_approval_required BOOLEAN NOT NULL DEFAULT false,
   owner_team            STRING    NOT NULL COMMENT 'Operationeel verantwoordelijke domeinteam',
   criticality           STRING    NOT NULL DEFAULT 'MEDIUM' COMMENT 'LOW | MEDIUM | HIGH',
   processing_route      STRING    NOT NULL DEFAULT 'RAW_VAULT'
@@ -131,6 +138,67 @@ USING DELTA
 COMMENT 'Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in meta_dependency.'
 TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
+-- -----------------------------------------------------------------------------
+-- 2b. Onderhoudsbeleid voor Delta-tabellen
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meta_table_maintenance_policy (
+  policy_id                 STRING    NOT NULL,
+  catalog_name              STRING    NOT NULL,
+  schema_name               STRING,
+  table_name                STRING,
+  maintenance_tier          STRING    NOT NULL COMMENT 'HOT | WARM | COLD | AUDIT',
+  optimize_mode             STRING    NOT NULL COMMENT 'SCHEDULED | DISABLED',
+  optimize_interval_hours   INT       NOT NULL,
+  min_files_before_optimize BIGINT    NOT NULL DEFAULT 20,
+  vacuum_retain_hours       INT       NOT NULL,
+  priority                  INT       NOT NULL DEFAULT 100,
+  is_active                 BOOLEAN   NOT NULL DEFAULT true,
+  CONSTRAINT pk_maintenance_policy PRIMARY KEY (policy_id) RELY
+)
+USING DELTA
+COMMENT 'Overervend onderhoudsbeleid per catalog, schema of tabel; laagste priority wint.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
+-- -----------------------------------------------------------------------------
+-- 2c. Governancebeleid per bronsysteem
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meta_data_governance_policy (
+  source_system_id       STRING    NOT NULL,
+  data_owner             STRING    NOT NULL,
+  data_steward           STRING    NOT NULL,
+  data_domain            STRING    NOT NULL,
+  pii_classification     STRING    NOT NULL COMMENT 'PUBLIC | INTERNAL | CONFIDENTIAL | RESTRICTED',
+  retention_days         INT       NOT NULL,
+  cost_center            STRING    NOT NULL,
+  sla_tier               STRING    NOT NULL COMMENT 'CRITICAL | STANDARD | BEST_EFFORT',
+  is_active              BOOLEAN   NOT NULL DEFAULT true,
+  CONSTRAINT pk_data_governance_policy PRIMARY KEY (source_system_id) RELY,
+  CONSTRAINT fk_governance_source FOREIGN KEY (source_system_id)
+    REFERENCES meta_source_system(source_system_id) RELY
+)
+USING DELTA
+COMMENT 'Eigenaarschap, classificatie, retentie en SLA voor ieder bronsysteem.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
+-- -----------------------------------------------------------------------------
+-- 2d. Gold data-productcontracten
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meta_gold_data_product (
+  publication_group_id   STRING    NOT NULL,
+  data_product_name      STRING    NOT NULL,
+  data_owner             STRING    NOT NULL,
+  data_steward           STRING    NOT NULL,
+  consumer_group         STRING    NOT NULL,
+  refresh_sla_hours      INT       NOT NULL,
+  compatibility_policy   STRING    NOT NULL COMMENT 'BACKWARD_COMPATIBLE | VERSIONED_BREAKING_CHANGE',
+  deprecation_date       DATE,
+  is_active              BOOLEAN   NOT NULL DEFAULT true,
+  CONSTRAINT pk_gold_data_product PRIMARY KEY (publication_group_id) RELY
+)
+USING DELTA
+COMMENT 'Consumercontract en ownership per atomisch Gold-publicatiegroep.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
 -- Formele goedkeuringsregistratie voor schema-drift, zodat de policy
 -- ALLOW_NEW_COLUMNS_WITH_APPROVAL afdwingbaar wordt in plaats van declaratief.
 CREATE TABLE IF NOT EXISTS meta_schema_drift_approval (
@@ -153,7 +221,6 @@ CREATE TABLE IF NOT EXISTS meta_schema_drift_approval (
     REFERENCES meta_source_object(source_object_id) RELY
 )
 USING DELTA
-COMMENT 'Goedkeuringsworkflow voor schema-drift per bronobject.'
 TBLPROPERTIES (
   'delta.feature.allowColumnDefaults' = 'supported',
   delta.enableChangeDataFeed = true

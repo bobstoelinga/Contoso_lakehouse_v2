@@ -1,0 +1,80 @@
+[
+  {
+    "policy_id": "POL-BRONZE-WARM",
+    "catalog_name": "contoso_bronze_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "WARM",
+    "optimize_mode": "SCHEDULED",
+    "optimize_interval_hours": 168,
+    "min_files_before_optimize": 20,
+    "vacuum_retain_hours": 336,
+    "priority": 100,
+    "is_active": true
+  },
+  {
+    "policy_id": "POL-QUALITY-WARM",
+    "catalog_name": "contoso_quality_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "WARM",
+    "optimize_mode": "SCHEDULED",
+    "optimize_interval_hours": 168,
+    "min_files_before_optimize": 20,
+    "vacuum_retain_hours": 336,
+    "priority": 100,
+    "is_active": true
+  },
+  {
+    "policy_id": "POL-REJECT-WARM",
+    "catalog_name": "contoso_reject_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "WARM",
+    "optimize_mode": "SCHEDULED",
+    "optimize_interval_hours": 168,
+    "min_files_before_optimize": 20,
+    "vacuum_retain_hours": 720,
+    "priority": 100,
+    "is_active": true
+  },
+  {
+    "policy_id": "POL-VAULT-HOT",
+    "catalog_name": "contoso_vault_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "HOT",
+    "optimize_mode": "SCHEDULED",
+    "optimize_interval_hours": 72,
+    "min_files_before_optimize": 20,
+    "vacuum_retain_hours": 720,
+    "priority": 100,
+    "is_active": true
+  },
+  {
+    "policy_id": "POL-GOLD-HOT",
+    "catalog_name": "contoso_gold_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "HOT",
+    "optimize_mode": "SCHEDULED",
+    "optimize_interval_hours": 72,
+    "min_files_before_optimize": 10,
+    "vacuum_retain_hours": 720,
+    "priority": 100,
+    "is_active": true
+  },
+  {
+    "policy_id": "POL-META-AUDIT",
+    "catalog_name": "contoso_meta_${env}",
+    "schema_name": null,
+    "table_name": null,
+    "maintenance_tier": "AUDIT",
+    "optimize_mode": "DISABLED",
+    "optimize_interval_hours": 0,
+    "min_files_before_optimize": 999999,
+    "vacuum_retain_hours": 2160,
+    "priority": 100,
+    "is_active": true
+  }
+]

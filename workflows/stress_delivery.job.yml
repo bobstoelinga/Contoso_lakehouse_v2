@@ -40,3 +40,4 @@ resources:
               order_count: "{{job.parameters.order_count}}"
               return_count: "{{job.parameters.return_count}}"
               change_set: "{{job.parameters.change_set}}"
+              repo_root: ${workspace.file_path}

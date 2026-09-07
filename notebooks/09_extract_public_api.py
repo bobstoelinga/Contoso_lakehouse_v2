@@ -30,7 +30,7 @@ source_object_id = dbutils.widgets.get("source_object_id")
 delivery_date = dbutils.widgets.get("delivery_date") or datetime.now(timezone.utc).date().isoformat()
 
 config = spark.sql(f"""
-SELECT s.source_system_id, sys.landing_volume_path, c.connector_type, c.endpoint_url,
+SELECT s.source_system_id, s.load_strategy, sys.landing_volume_path, c.connector_type, c.endpoint_url,
        c.records_key, c.next_link_key, c.request_options
 FROM {settings.meta_catalog}.metadata.meta_source_object s
 JOIN {settings.meta_catalog}.metadata.meta_source_connector c
@@ -43,6 +43,10 @@ if len(config) != 1:
     raise ValueError(f"Geen actieve connectorconfiguratie voor {source_object_id}.")
 
 row = config[0]
+expected_objects = spark.sql(f"""
+SELECT count(*) AS n FROM {settings.meta_catalog}.metadata.meta_source_object
+WHERE source_system_id = '{row.source_system_id}' AND is_active AND is_mandatory_in_delivery
+""").first().n
 landing_root = settings.resolve(row.landing_volume_path)
 object_folder = source_object_id.rsplit(".", 1)[-1].lower()
 target = f"{landing_root}/{delivery_date}/{object_folder}"
@@ -133,6 +137,10 @@ with audit.run("LANDING", source_object_id) as stats:
             "extracted_at_utc": datetime.now(timezone.utc).isoformat(),
         }, sort_keys=True), True)
         dbutils.fs.mv(staging, target, True)
+        audit.close_delivery_manifest(
+            delivery_id, row.source_system_id, f"{target}/_manifest.json", expected_objects,
+            file_count=1, snapshot_complete=row.load_strategy == "SNAPSHOT_SCD2",
+        )
         stats["rows_read"] = rows_written
         stats["rows_inserted"] = rows_written
         print(f"{source_object_id}: {rows_written} records gepubliceerd naar {target}")

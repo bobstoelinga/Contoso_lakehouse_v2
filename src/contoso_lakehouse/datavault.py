@@ -31,6 +31,38 @@ class VaultLoader:
     def _delivery_filter(self) -> str:
         return f"_delivery_id = '{self.ctx.delivery_id}'"
 
+    @staticmethod
+    def _satellite_state_table(entity: DvEntity) -> str:
+        return f"{entity.physical_table_fqn}__current_state"
+
+    def _ensure_satellite_state(self, entity: DvEntity) -> str:
+        """Bootstrap een compacte actuele hashdiff-state vanuit historie, éénmalig."""
+        state = self._satellite_state_table(entity)
+        key = safe_identifier(entity.hash_key_column)
+        self.spark.sql(
+            f"""
+            CREATE TABLE IF NOT EXISTS {state} (
+              {key} STRING NOT NULL,
+              hashdiff STRING NOT NULL,
+              last_seen_load_date TIMESTAMP NOT NULL
+            ) USING DELTA CLUSTER BY ({key})
+            """
+        )
+        has_state = self.spark.sql(f"SELECT 1 FROM {state} LIMIT 1").collect()
+        if not has_state:
+            self.spark.sql(
+                f"""
+                MERGE INTO {state} t
+                USING (
+                  SELECT {key}, hashdiff, load_date AS last_seen_load_date
+                  FROM {entity.physical_table_fqn}
+                  QUALIFY row_number() OVER (PARTITION BY {key} ORDER BY load_date DESC) = 1
+                ) s ON t.{key} = s.{key}
+                WHEN NOT MATCHED THEN INSERT *
+                """
+            )
+        return state
+
     def _purge_batch(self, entity: DvEntity) -> None:
         self.spark.sql(
             f"DELETE FROM {entity.physical_table_fqn} WHERE _batch_id = '{self.ctx.batch_id}'"
@@ -133,6 +165,7 @@ class VaultLoader:
             for m in descriptive
         )
         attr_names = ", ".join(safe_identifier(m.target_column) for m in descriptive)
+        state = self._ensure_satellite_state(entity)
 
         # Alleen wegschrijven als de hashdiff verschilt van de laatst bekende versie.
         sql = f"""
@@ -151,9 +184,7 @@ class VaultLoader:
             PARTITION BY {entity.hash_key_column} ORDER BY hashdiff) = 1
         ),
         latest AS (
-          SELECT {entity.hash_key_column}, hashdiff FROM {entity.physical_table_fqn}
-          QUALIFY row_number() OVER (
-            PARTITION BY {entity.hash_key_column} ORDER BY load_date DESC) = 1
+                    SELECT {entity.hash_key_column}, hashdiff FROM {state}
         )
         SELECT d.{entity.hash_key_column},
                {self.ctx.load_date_literal},
@@ -165,7 +196,23 @@ class VaultLoader:
         LEFT JOIN latest l ON l.{entity.hash_key_column} = d.{entity.hash_key_column}
         WHERE l.hashdiff IS NULL OR l.hashdiff <> d.hashdiff
         """
-        return self._execute(sql)
+        inserted = self._execute(sql)
+        self.spark.sql(
+            f"""
+            MERGE INTO {state} t
+            USING (
+              SELECT {hk_expr} AS {entity.hash_key_column}, {hd_expr} AS hashdiff,
+                     {self.ctx.load_date_literal} AS last_seen_load_date
+              FROM {source}
+              WHERE {self._delivery_filter()}
+              QUALIFY row_number() OVER (
+                PARTITION BY {entity.hash_key_column} ORDER BY hashdiff) = 1
+            ) s ON t.{entity.hash_key_column} = s.{entity.hash_key_column}
+            WHEN MATCHED THEN UPDATE SET hashdiff = s.hashdiff, last_seen_load_date = s.last_seen_load_date
+            WHEN NOT MATCHED THEN INSERT *
+            """
+        )
+        return inserted
 
     # -- uitvoering -------------------------------------------------------
     def _execute(self, sql: str) -> int:

@@ -19,7 +19,8 @@ import sys
 
 sys.path.insert(0, f"{dbutils.widgets.get('repo_root')}/src")
 
-from contoso_lakehouse.context import Settings
+from contoso_lakehouse.audit import AuditLogger
+from contoso_lakehouse.context import RunContext, Settings
 from contoso_lakehouse.sqlutil import sql_string
 
 settings = Settings(env=dbutils.widgets.get("env"))
@@ -32,6 +33,7 @@ if not all((delivery_id, reason, approved_by, approval_reference)):
     raise ValueError("delivery_id, reason, approved_by en approval_reference zijn verplicht.")
 
 audit_delivery = f"{settings.meta_catalog}.audit.audit_delivery"
+audit = AuditLogger(spark, RunContext.create(settings, delivery_id=delivery_id))
 row = spark.sql(
     f"""
     SELECT delivery_status FROM {audit_delivery}
@@ -45,16 +47,7 @@ if row.delivery_status != "QUARANTINED":
         f"Alleen een QUARANTINED levering mag worden vrijgegeven; huidige status: {row.delivery_status}"
     )
 
-spark.sql(
-    f"""
-    UPDATE {audit_delivery}
-    SET delivery_status = 'COMPLETE',
-        released_at = current_timestamp(),
-        released_by = {sql_string(approved_by)},
-        release_reason = {sql_string(reason)},
-        release_approval_reference = {sql_string(approval_reference)}
-    WHERE delivery_id = {sql_string(delivery_id)}
-      AND delivery_status = 'QUARANTINED'
-    """
+audit.transition_delivery(
+    delivery_id, "COMPLETE", approved_by, reason, approval_reference,
 )
 print(f"Levering uit quarantaine vrijgegeven: {delivery_id}")

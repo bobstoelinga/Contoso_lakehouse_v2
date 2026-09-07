@@ -44,9 +44,19 @@ resources:
 
         # ------------------------------------------------------------------
         - task_key: plan_bronze_fanout
-          depends_on: [{ task_key: validate_metadata }]
+          depends_on: [{ task_key: register_delivery_manifests }]
           notebook_task:
             notebook_path: ../notebooks/06_plan_bronze_fanout.py
+            base_parameters:
+              env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
+              repo_root: ${workspace.file_path}
+
+        # ------------------------------------------------------------------
+        - task_key: register_delivery_manifests
+          depends_on: [{ task_key: validate_metadata }]
+          notebook_task:
+            notebook_path: ../notebooks/04_register_delivery_manifests.py
             base_parameters:
               env: ${var.env}
               source_system_id: "{{job.parameters.source_system_id}}"
@@ -105,7 +115,7 @@ resources:
 
         # ------------------------------------------------------------------
         - task_key: raw_vault
-          depends_on: [{ task_key: quality }]
+          depends_on: [{ task_key: reconcile_quality }]
           notebook_task:
             notebook_path: ../notebooks/30_data_vault.py
             base_parameters:
@@ -117,7 +127,7 @@ resources:
               repo_root: ${workspace.file_path}
 
         - task_key: reference_data
-          depends_on: [{ task_key: quality }]
+          depends_on: [{ task_key: reconcile_quality }]
           notebook_task:
             notebook_path: ../notebooks/31_reference_data.py
             base_parameters:
@@ -135,6 +145,18 @@ resources:
               env: ${var.env}
               source_system_id: "{{job.parameters.source_system_id}}"
               zone: BUSINESS_VAULT
+              delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
+              batch_id: "{{tasks.delivery_gate.values.batch_id}}"
+              repo_root: ${workspace.file_path}
+
+        # ------------------------------------------------------------------
+        - task_key: reconcile_quality
+          depends_on: [{ task_key: quality }]
+          notebook_task:
+            notebook_path: ../notebooks/21_reconcile_quality.py
+            base_parameters:
+              env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
               delivery_id: "{{tasks.delivery_gate.values.delivery_id}}"
               batch_id: "{{tasks.delivery_gate.values.batch_id}}"
               repo_root: ${workspace.file_path}

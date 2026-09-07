@@ -7,16 +7,27 @@ alleen de lagen. Welke entiteiten binnen een laag draaien en in welke volgorde,
 komt uit `meta_dependency`. Een nieuw bronobject of een nieuwe satellite vereist
 dus geen wijziging in [workflows/pipeline.job.yml](../workflows/pipeline.job.yml).
 
+## Metadata release-gate
+
+Vóór `databricks bundle deploy` draait CI `python -m
+contoso_lakehouse.release_check` gevolgd door `pytest -q`. De eerste check
+valideert de complete Git-seedrelease zonder Spark: JSON-structuur, unieke
+sleutels, dependency-verwijzingen en veilige onderhoudspolicies. Notebook 99
+blijft de tweede gate in Databricks en compileert daarna de runtime-expressies
+tegen de feitelijke Unity Catalog-tabellen.
+
 ## Taakgraaf
 
 ```mermaid
 flowchart TD
-    A[validate_metadata] --> B[bronze_ingest]
+    A[validate_metadata] --> M[register_delivery_manifests]
+    M --> B[bronze_ingest]
     B --> C[delivery_gate]
     C --> D{gate_is_open}
     D -->|true| E[quality]
     D -->|false| X[Run eindigt: SKIPPED]
-    E --> F[raw_vault]
+    E --> R[reconcile_quality]
+    R --> F[raw_vault]
     F --> G[business_vault]
     G --> H[gold_historical]
     H --> I[gold_current]
@@ -25,14 +36,19 @@ flowchart TD
 | Taak | Notebook | Verantwoordelijkheid |
 |---|---|---|
 | `validate_metadata` | 99 | Cycli, wees-verwijzingen en compileerbaarheid van alle expressies |
+| `register_delivery_manifests` | 04 | Valideert en registreert gesloten rootmanifests van push-bronnen |
 | `bronze_ingest` | 10 | Auto Loader per bronobject; `max_retries: 3` wegens schema evolution |
 | `delivery_gate` | 05 | Bepaalt de eerstvolgende complete levering; zet `gate_open` en `delivery_id` als taskValue |
 | `gate_is_open` | — | `condition_task`; blokkeert alles wat volgt als de levering niet compleet is |
 | `quality` | 20 | DQ-regels in één pass; passed → Quality, failed → Reject |
+| `reconcile_quality` | 21 | Bewijst Bronze = Quality + Reject per bronobject en delivery |
 | `raw_vault` | 30 (`zone=RAW_VAULT`) | Hubs, links, satellites in topologische volgorde |
 | `business_vault` | 30 (`zone=BUSINESS_VAULT`) | Computed satellites |
 | `gold_historical` | 40 | SCD2 MERGE |
 | `gold_current` | 41 | Bouwt slots en publiceert de publication group in één stap |
+| `lakehouse_maintenance` | 90 | Resolvet metadata-policies, schrijft een onderhoudsplan en voert alleen verschuldigde acties uit |
+| `contoso_operations_monitoring` | 43 | Controleert manifest- en delivery-SLA's, work-item dead letters en verlopen leases |
+| `requeue_dead_letter_work_item` | 12 | Heropent een goedgekeurd dead-letter work-item voor de volgende pipeline-run |
 
 ## Trigger
 
@@ -47,6 +63,16 @@ trigger:
 Auto Loader start Bronze zodra er bestanden binnenkomen. `wait_after_last_change`
 voorkomt dat de run start terwijl het bronsysteem nog bezig is met uploaden.
 
+## Delivery-manifest voor push-bronnen
+
+Een push-bron schrijft in de datumfolder als laatste
+`_manifest.json`. De manifestregistratie-taak leest uitsluitend datumfolders en
+accepteert alleen `status = CLOSED` en een bijpassende `delivery_id`. Het
+manifest bevat minimaal `delivery_id`, `status`, `file_count` en, wanneer de
+bron absence-deletes gebruikt, `is_snapshot_complete = true`. De taak schrijft
+de gecontroleerde verklaring idempotent naar `audit_delivery_manifest`; Bronze
+en de delivery-gate volgen daarna de bestaande generieke route.
+
 ## Planning van pull-bronnen
 
 Pull-bronnen worden niet via `file_arrival` gescheduled, omdat de levering pas
@@ -58,6 +84,15 @@ De periodieke schedules staan op deze laadjobs, niet op de generieke extractjob
 en niet op de generieke pipeline. Zo blijft retry, alerting, audit en
 end-to-end lineage per bron zichtbaar. In `dev` blijven de schedules gepauzeerd;
 in `tst` en `prd` worden ze via `pull_schedule_pause_status` geactiveerd.
+
+## Operationele SLO-monitoring
+
+De zelfstandige monitoringjob draait ieder halfuur en faalt hard bij een
+manifest dat langer dan de bron-SLA open blijft, een complete delivery zonder
+actieve Gold-publicatie binnen die SLA, een `DEAD_LETTER` work-item, een verlopen
+work-itemlease of een verlopen Gold-publicatielease. De standaard job-alert
+escaleert zulke blokkades; de detailqueries staan in
+[sql/01_metadata/13_monitoring_queries.sql](../sql/01_metadata/13_monitoring_queries.sql).
 
 | Bron | Job | Planning |
 |---|---|---|

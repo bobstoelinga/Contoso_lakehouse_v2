@@ -26,7 +26,7 @@ source_object_id = dbutils.widgets.get("source_object_id")
 delivery_date = dbutils.widgets.get("delivery_date") or datetime.now(timezone.utc).date().isoformat()
 
 config = spark.sql(f"""
-SELECT s.source_system_id, sys.landing_volume_path, c.endpoint_url, c.request_options
+SELECT s.source_system_id, s.load_strategy, sys.landing_volume_path, c.endpoint_url, c.request_options
 FROM {settings.meta_catalog}.metadata.meta_source_object s
 JOIN {settings.meta_catalog}.metadata.meta_source_connector c USING (source_object_id)
 JOIN {settings.meta_catalog}.metadata.meta_source_system sys USING (source_system_id)
@@ -37,6 +37,10 @@ if len(config) != 1:
     raise ValueError(f"Geen actieve JDBC-configuratie voor {source_object_id}.")
 
 row = config[0]
+expected_objects = spark.sql(f"""
+SELECT count(*) AS n FROM {settings.meta_catalog}.metadata.meta_source_object
+WHERE source_system_id = '{row.source_system_id}' AND is_active AND is_mandatory_in_delivery
+""").first().n
 options = row.request_options or {}
 source_query = options.get("source_query")
 secret_scope = options.get("secret_scope", "fabric-extract")
@@ -74,6 +78,10 @@ with audit.run("LANDING", source_object_id) as stats:
         frame.write.mode("overwrite").parquet(staging)
         dbutils.fs.put(f"{staging}/_manifest.json", json.dumps({"source_object_id": source_object_id, "delivery_id": delivery_id, "rows_written": rows_written, "extracted_at_utc": datetime.now(timezone.utc).isoformat()}, sort_keys=True), True)
         dbutils.fs.mv(staging, target, True)
+        audit.close_delivery_manifest(
+            delivery_id, row.source_system_id, f"{target}/_manifest.json", expected_objects,
+            file_count=1, snapshot_complete=row.load_strategy == "SNAPSHOT_SCD2",
+        )
         stats["rows_read"] = rows_written
         stats["rows_inserted"] = rows_written
     finally:

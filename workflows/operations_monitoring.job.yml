@@ -1,0 +1,27 @@
+# Geplande control-plane monitoring; faalt hard zodat standaard job-alerting
+# incomplete leveringen en vastgelopen retries zichtbaar maakt.
+resources:
+  jobs:
+    contoso_operations_monitoring:
+      name: "[${var.env}] Contoso - Operations Monitoring"
+      description: >-
+        Controleert delivery-SLA's, manifests, work-item dead letters en verlopen
+        Gold-publicatieleases.
+      max_concurrent_runs: 1
+
+      schedule:
+        quartz_cron_expression: "0 0/30 * ? * *"
+        timezone_id: Europe/Amsterdam
+        pause_status: ${var.pull_schedule_pause_status}
+
+      email_notifications:
+        on_failure:
+          - data-platform-alerts@contoso.com
+
+      tasks:
+        - task_key: monitor_operations
+          notebook_task:
+            notebook_path: ../notebooks/43_monitor_operations.py
+            base_parameters:
+              env: ${var.env}
+              repo_root: ${workspace.file_path}

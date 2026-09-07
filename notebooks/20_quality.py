@@ -43,9 +43,13 @@ engine = QualityEngine(spark, repo, ctx)
 
 # COMMAND ----------
 
-for obj in repo.source_objects():
-    if obj.source_system_id != source_system_id:
-        continue
+objects = [obj for obj in repo.source_objects() if obj.source_system_id == source_system_id]
+waves = orch.execution_waves(
+    "QUALITY", {obj.source_object_id for obj in objects}, max_parallelism=1,
+)
+objects_by_id = {obj.source_object_id: obj for obj in objects}
+for source_object_id in (item for wave in waves for item in wave):
+    obj = objects_by_id[source_object_id]
     orch.require_upstream_success(obj.source_object_id, "QUALITY")
     print(f"--- {obj.source_object_id} ---")
     stats = engine.run(obj.source_object_id, delivery_id)

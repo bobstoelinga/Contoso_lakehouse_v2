@@ -35,6 +35,9 @@ erDiagram
 | `meta_gold_entity` | Gold Historisch en Actueel, gebonden aan een bronsysteem/data product | `gold_entity_id` |
 | `meta_retry_policy` | Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in `meta_dependency` | `retry_policy_id` |
 | `meta_schema_drift_approval` | Goedkeuringsworkflow voor schema-drift per bronobject | `approval_id` |
+| `meta_table_maintenance_policy` | Overervend Delta-onderhoudsbeleid per catalog, schema of tabel | `policy_id` |
+| `meta_data_governance_policy` | Eigenaarschap, classificatie, retentie en SLA per bronsysteem | `source_system_id` |
+| `meta_gold_data_product` | Consumercontract, ownership en compatibiliteit per Gold-publicatiegroep | `publication_group_id` |
 
 ## Audittabellen (`contoso_meta_<env>.audit`)
 
@@ -42,12 +45,69 @@ erDiagram
 |---|---|
 | `audit_delivery` | Eén rij per logische levering, met volgnummer en status |
 | `audit_delivery_object` | Bronze laadstatus per object per levering |
+| `audit_delivery_manifest` | Bronverklaring dat een delivery volledig en atomisch is gepubliceerd |
+| `audit_delivery_state_transition` | Append-only historie van toegestane delivery-statusovergangen |
+| `audit_work_item` | Persistente queue per delivery, laag en entiteit met retry- en lease-status |
 | `audit_load_run` | Uitvoeringslog van elke stap in elke laag |
 | `audit_dq_result` | Meetresultaat per kwaliteitsregel per run |
 | `audit_gold_publication` | Welk fysiek slot van Gold Actueel actief is |
 | `v_delivery_readiness` | **Gate:** is een levering compleet? |
 | `v_next_processable_delivery` | **Gate:** welke levering is als eerste aan de beurt? |
 | `v_active_gold_publication` | Laatste succesvolle publicatie per Gold entiteit |
+
+### Delivery-manifest (`audit_delivery_manifest`)
+
+Elke delivery heeft precies één centraal manifest. Een extract- of generatorpad
+sluit dit pas nadat staging atomisch naar de definitieve delivery-folder is
+verplaatst. De gate opent uitsluitend wanneer het manifest `CLOSED` is, de
+verwachte object- en bestandsaantallen consistent zijn en bij
+`absence_means_delete = true` de delivery als volledige snapshot is gemarkeerd.
+Een `_manifest.json` in Landing is het fysieke bewijs; de audittabel is het
+transactionele besturingscontract voor Databricks Workflows.
+
+### Control plane voor uitvoering en herstel
+
+`audit_delivery_state_transition` bewaakt de delivery state machine. Overgangen
+naar `SUPERSEDED` en een vrijgave van `QUARANTINED` naar `COMPLETE` vereisen een
+reden en approval-reference. De remediation-notebooks gebruiken uitsluitend dit
+centrale contract.
+
+`audit_work_item` beheert een uitvoerbare stap per delivery, laag en entiteit.
+Een deliverygebonden run plant en claimt het work-item idempotent met een lease
+van vier uur. Bij falen volgt een vertraagde retry; na het ingestelde maximum
+wordt de stap `DEAD_LETTER`. Bronze blijft uitgezonderd omdat een Auto Loader
+microbatch meerdere deliveries kan bevatten.
+
+Een `DEAD_LETTER` work-item wordt uitsluitend via de remediationworkflow
+heropend. `audit_work_item_transition` bewaart de append-only overgang naar
+`PENDING`, inclusief actor, reden en approval-reference. De operator herplant
+alleen; de volgende pipeline-run claimt en voert het work-item uit.
+
+### Onderhoudsbeleid (`meta_table_maintenance_policy`)
+
+Onderhoud wordt niet per script of handmatige tabellijst beheerd. Een policy
+geldt voor een catalog en kan later op schema- of tabelniveau worden
+overschreven. De policy bepaalt onderhoudstier, optimalisatiemodus,
+minimumaantal files, interval en veilige VACUUM-retentie. De planner schrijft
+elke run naar `audit_maintenance_run` en iedere geplande, overgeslagen,
+uitgevoerde of gefaalde actie naar `audit_maintenance_action`.
+
+### Datagovernance per bron (`meta_data_governance_policy`)
+
+Iedere actieve bron heeft één policy met `data_owner`, `data_steward`,
+`data_domain`, `pii_classification`, `retention_days`, `cost_center` en
+`sla_tier`. De lokale release-gate weigert een actieve bron zonder policy,
+ongeldige classificatie, onbekende SLA-tier of niet-positieve retentie.
+Productiemetadata blijft schrijfbaar uitsluitend voor de deployment identity;
+data engineers hebben leesrechten voor onderzoek en ontwikkeling.
+
+### Gold data-productcontract (`meta_gold_data_product`)
+
+Iedere actieve `CURRENT`-publicatiegroep heeft één contract met productnaam,
+owner, steward, consumer group, refresh-SLA en compatibiliteitsbeleid. De
+release-gate weigert een actieve Gold-publicatiegroep zonder contract of met
+een ongeldige SLA of compatibiliteitsstrategie. Gold wordt daarmee expliciet
+als consumercontract beheerd, niet alleen als technische output.
 
 ## Belangrijke velden
 

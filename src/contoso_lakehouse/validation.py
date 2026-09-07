@@ -36,6 +36,47 @@ class MetadataValidator:
             return str(exc).splitlines()[0][:500]
 
     # -- mappings ---------------------------------------------------------
+    def validate_source_objects(self) -> list[ValidationIssue]:
+        """Blokkeert onuitvoerbare laad- en deletecontracten vóór de runtime."""
+        issues: list[ValidationIssue] = []
+        strategies = {
+            "INCREMENTAL_APPEND", "INCREMENTAL_MERGE", "INCREMENTAL_CDC",
+            "SNAPSHOT_SCD2", "PARTIAL_SNAPSHOT", "FULL_OVERWRITE",
+        }
+        delete_semantics = {"NONE", "SOFT_DELETE_FLAG", "SNAPSHOT_ABSENCE", "CDC_TOMBSTONE"}
+        for obj in self.repo.source_objects():
+            strategy = getattr(obj, "load_strategy", "")
+            deletion = getattr(obj, "delete_semantics", "NONE")
+            absence_deletes = bool(getattr(obj, "absence_means_delete", False))
+            if strategy not in strategies:
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    f"Niet-ondersteunde load_strategy: {strategy}"))
+            if deletion not in delete_semantics:
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    f"Ongeldige delete_semantics: {deletion}"))
+            if absence_deletes and strategy != "SNAPSHOT_SCD2":
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    "absence_means_delete vereist SNAPSHOT_SCD2 en een complete snapshot."))
+            if deletion == "SOFT_DELETE_FLAG" and not getattr(obj, "deleted_flag_column", None):
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    "SOFT_DELETE_FLAG vereist deleted_flag_column."))
+            if deletion == "SNAPSHOT_ABSENCE" and not absence_deletes:
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    "SNAPSHOT_ABSENCE vereist absence_means_delete = true."))
+            if deletion == "CDC_TOMBSTONE" and strategy != "INCREMENTAL_CDC":
+                issues.append(ValidationIssue("SOURCE_OBJECT", obj.source_object_id,
+                    "CDC_TOMBSTONE vereist INCREMENTAL_CDC."))
+        return issues
+
+    def validate_dependencies(self) -> list[ValidationIssue]:
+        allowed = {"DELIVERY_COMPLETE", "UPSTREAM_SUCCESS", "SAME_DELIVERY"}
+        return [
+            ValidationIssue("DEPENDENCY", dependency.dependency_id,
+                f"Ongeldig dependency_type: {dependency.dependency_type}")
+            for dependency in self.repo.dependencies()
+            if dependency.dependency_type not in allowed
+        ]
+
     def validate_mappings(self) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
         for obj in self.repo.source_objects():
@@ -148,7 +189,9 @@ class MetadataValidator:
 
     def validate_all(self) -> list[ValidationIssue]:
         return (
-            self.validate_mappings()
+            self.validate_source_objects()
+            + self.validate_dependencies()
+            + self.validate_mappings()
             + self.validate_quality_rules()
             + self.validate_dv()
             + self.validate_gold()

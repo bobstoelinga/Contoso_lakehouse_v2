@@ -179,6 +179,12 @@ class MetadataRepository:
                     else ""
                 ),
                 load_order=r.load_order,
+                delete_semantics=getattr(r, "delete_semantics", "NONE") or "NONE",
+                absence_means_delete=bool(getattr(r, "absence_means_delete", False)),
+                schema_contract_version=getattr(r, "schema_contract_version", "1.0") or "1.0",
+                late_arrival_window_days=getattr(r, "late_arrival_window_days", 30) or 30,
+                freshness_sla_hours=getattr(r, "freshness_sla_hours", 26) or 26,
+                backfill_strategy=getattr(r, "backfill_strategy", "FULL_RELOAD") or "FULL_RELOAD",
             )
             for r in rows
         ]
@@ -189,6 +195,22 @@ class MetadataRepository:
             if obj.source_object_id == source_object_id:
                 return obj
         raise KeyError(f"Onbekend bronobject: {source_object_id}")
+
+    def schema_drift_is_approved(self, source_object_id: str, columns: list[str]) -> bool:
+        """Controleert of iedere nieuwe bronkolom expliciet is goedgekeurd."""
+        if not columns:
+            return True
+        rows = self.spark.sql(
+            f"""
+            SELECT explode(detected_columns) AS column_name
+            FROM {self._meta}.meta_schema_drift_approval
+            WHERE source_object_id = '{safe_identifier(source_object_id)}'
+              AND status = 'APPROVED'
+              AND drift_type = 'ADD_COLUMN'
+            """
+        ).collect()
+        approved = {row.column_name for row in rows}
+        return set(columns) <= approved
 
     def mandatory_objects(self, source_system_id: str) -> tuple[SourceObject, ...]:
         return tuple(

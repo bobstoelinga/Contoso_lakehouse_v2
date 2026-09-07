@@ -177,8 +177,10 @@ class BronzeLoader:
                 f"{obj.source_object_id}: onbekende bronkolommen bij STRICT: {', '.join(new_columns)}"
             )
         if obj.schema_drift_policy == "ALLOW_NEW_COLUMNS_WITH_APPROVAL":
+            if self.repo.schema_drift_is_approved(obj.source_object_id, new_columns):
+                return
             raise SchemaDriftError(
-                f"{obj.source_object_id}: bronkolommen vereisen QUALITY-mappinggoedkeuring: "
+                f"{obj.source_object_id}: bronkolommen vereisen schema-driftgoedkeuring: "
                 f"{', '.join(new_columns)}"
             )
         raise SchemaDriftError(

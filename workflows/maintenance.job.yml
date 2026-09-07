@@ -19,3 +19,4 @@ resources:
             base_parameters:
               env: ${var.env}
               repo_root: ${workspace.file_path}
+              dry_run: "false"

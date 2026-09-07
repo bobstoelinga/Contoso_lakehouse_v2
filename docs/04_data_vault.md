@@ -55,6 +55,14 @@ herschrijven van bestaande parquet-bestanden bij elke load. Daarom:
 Een nieuwe satellite-rij wordt alleen weggeschreven als de `hashdiff` afwijkt van
 de laatst bekende versie voor dezelfde hash key.
 
+Voor change-detectie onderhoudt de loader daarnaast per fysieke satellite een
+compacte technische tabel `<satellite>_h__current_state`. Deze bevat uitsluitend
+hash key, actuele hashdiff en de laatst geziene load date. Bij de eerste run
+bootstrappt zij vanuit de historie; daarna vergelijkt iedere delivery alleen met
+deze actuele state in plaats van de volledige satellitehistorie. De state is
+geen consumercontract en verandert de append-only `*_h`-tabel of de publieke
+Satellite-view niet.
+
 ## Delete-detectie
 
 Bij `SNAPSHOT_SCD2`-bronnen verdwijnt een verwijderde sleutel simpelweg uit de

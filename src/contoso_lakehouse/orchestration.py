@@ -78,7 +78,8 @@ class Orchestrator:
     def require_delivery_complete(self, delivery_id: str, critical_only: bool = False) -> None:
         row = self.spark.sql(
             f"""
-            SELECT is_ready, success_count, expected_object_count, failed_count
+            SELECT is_ready, success_count, expected_object_count, failed_count,
+                   manifest_status, is_snapshot_complete, requires_complete_snapshot
             FROM {self.audit_schema}.v_delivery_readiness
             WHERE delivery_id = '{delivery_id}'
             """
@@ -125,6 +126,7 @@ class Orchestrator:
                 f"""
                 SELECT count(*) AS n FROM {self.audit_schema}.v_load_run_status
                 WHERE batch_id = '{self.ctx.batch_id}'
+                                    {f"AND delivery_id = '{self.ctx.delivery_id}'" if dep.dependency_type == "SAME_DELIVERY" else ""}
                   AND entity_id = '{dep.depends_on_entity_id}'
                   AND layer     = '{dep.depends_on_layer}'
                   AND run_status = 'SUCCESS'

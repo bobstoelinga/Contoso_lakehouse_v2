@@ -76,3 +76,24 @@ ORDER BY g.published_at DESC, p.gold_entity_id;
 SELECT *
 FROM contoso_gold_${env}.current.v_gold_freshness
 ORDER BY entity;
+
+-- 9. Control-plane queue: handmatige actie vereist voor dead letters of verlopen leases.
+SELECT delivery_id, layer, entity_id, work_status, attempt_count, max_attempts,
+     lease_expires_at, last_error, updated_at
+FROM audit_work_item
+WHERE work_status = 'DEAD_LETTER'
+  OR (work_status = 'RUNNING' AND lease_expires_at < current_timestamp())
+ORDER BY updated_at DESC;
+
+-- 10. Verlopen Gold-publicatieleases.
+SELECT publication_group_id, batch_id, lease_id, acquired_at, expires_at
+FROM audit_gold_publication_lease
+WHERE released_at IS NULL AND expires_at < current_timestamp()
+ORDER BY expires_at;
+
+-- 11. Mislukte laagreconciliaties; blokkeren vervolgverwerking naar de Vault.
+SELECT delivery_id, source_object_id, reconciliation_name, expected_count,
+       actual_count, tolerance_count, evaluated_at
+FROM audit_reconciliation_result
+WHERE reconciliation_status = 'FAILED'
+ORDER BY evaluated_at DESC;

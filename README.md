@@ -70,7 +70,8 @@ flowchart LR
 ## Deploy
 
 ```bash
-# 0. Metadata-consistentie lokaal controleren
+# 0. Metadatarelease en regressies lokaal controleren
+python -m contoso_lakehouse.release_check
 pytest -q
 
 # 1. Unity Catalog + metadata objecten

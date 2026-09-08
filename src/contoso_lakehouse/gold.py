@@ -208,14 +208,14 @@ class GoldLoader:
                           '{lease_id}' AS lease_id,
                           '{self.ctx.batch_id}' AS batch_id) s
               ON t.publication_group_id = s.publication_group_id
-            WHEN NOT MATCHED THEN INSERT (
-              publication_group_id, lease_id, batch_id, acquired_at, expires_at, released_at)
-            VALUES (s.publication_group_id, s.lease_id, s.batch_id, current_timestamp(),
-                    current_timestamp() + INTERVAL 4 HOURS, NULL)
             WHEN MATCHED AND (t.released_at IS NOT NULL OR t.expires_at <= current_timestamp()) THEN UPDATE SET
               lease_id = s.lease_id, batch_id = s.batch_id,
               acquired_at = current_timestamp(), expires_at = current_timestamp() + INTERVAL 4 HOURS,
               released_at = NULL
+                        WHEN NOT MATCHED THEN INSERT (
+                            publication_group_id, lease_id, batch_id, acquired_at, expires_at, released_at)
+                        VALUES (s.publication_group_id, s.lease_id, s.batch_id, current_timestamp(),
+                                        current_timestamp() + INTERVAL 4 HOURS, NULL)
             """
         )
         row = self.spark.sql(

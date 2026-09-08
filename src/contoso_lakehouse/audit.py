@@ -126,6 +126,11 @@ class AuditLogger:
             MERGE INTO {self.audit}.audit_delivery_manifest t
             USING (SELECT {_sql_str(delivery_id)} AS delivery_id) s
               ON t.delivery_id = s.delivery_id
+            WHEN MATCHED AND t.manifest_status = 'OPEN' THEN UPDATE SET
+              manifest_status = 'CLOSED', manifest_path = {_sql_str(manifest_path)},
+              expected_object_count = {expected_objects}, expected_file_count = {file_count},
+              received_file_count = {file_count}, source_watermark = {_sql_str(source_watermark)},
+              is_snapshot_complete = {str(snapshot_complete).lower()}, closed_at = current_timestamp()
             WHEN NOT MATCHED THEN INSERT (
               delivery_id, source_system_id, manifest_status, manifest_path,
               expected_object_count, expected_file_count, received_file_count,
@@ -135,11 +140,6 @@ class AuditLogger:
               {_sql_str(manifest_path)}, {expected_objects}, {file_count}, {file_count},
               {_sql_str(source_watermark)}, {str(snapshot_complete).lower()},
               current_timestamp(), current_timestamp())
-            WHEN MATCHED AND t.manifest_status = 'OPEN' THEN UPDATE SET
-              manifest_status = 'CLOSED', manifest_path = {_sql_str(manifest_path)},
-              expected_object_count = {expected_objects}, expected_file_count = {file_count},
-              received_file_count = {file_count}, source_watermark = {_sql_str(source_watermark)},
-              is_snapshot_complete = {str(snapshot_complete).lower()}, closed_at = current_timestamp()
             """
         )
 
@@ -316,7 +316,7 @@ class AuditLogger:
         self, delivery_id: str, layer: str, entity_id: str, changed_by: str,
         reason: str, approval_reference: str,
     ) -> None:
-        """Heropent uitsluitend een goedgekeurd DEAD_LETTER work-item."""
+        """Heropent een goedgekeurd DEAD_LETTER of stale RUNNING work-item."""
         if not all((changed_by, reason, approval_reference)):
             raise ValueError("changed_by, reason en approval_reference zijn verplicht.")
         rows = self.spark.sql(
@@ -329,15 +329,19 @@ class AuditLogger:
         if not rows:
             raise ValueError(f"Work-item bestaat niet: {delivery_id} {layer}.{entity_id}")
         work_item = rows[0]
-        if work_item.work_status != "DEAD_LETTER":
-            raise ValueError(f"Alleen DEAD_LETTER mag worden heropend, huidige status: {work_item.work_status}")
+        if work_item.work_status not in {"DEAD_LETTER", "RUNNING"}:
+          raise ValueError(
+            f"Alleen DEAD_LETTER of RUNNING mag worden heropend, "
+            f"huidige status: {work_item.work_status}"
+          )
 
         self.spark.sql(
             f"""
             UPDATE {self.audit}.audit_work_item
             SET work_status = 'PENDING', attempt_count = 0, next_attempt_at = current_timestamp(),
               lease_id = NULL, lease_expires_at = NULL, updated_at = current_timestamp()
-            WHERE work_item_id = {_sql_str(work_item.work_item_id)} AND work_status = 'DEAD_LETTER'
+            WHERE work_item_id = {_sql_str(work_item.work_item_id)}
+              AND work_status = {_sql_str(work_item.work_status)}
             """
         )
         self.spark.sql(

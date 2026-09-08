@@ -26,3 +26,4 @@ resources:
             job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
             job_parameters:
               source_system_id: FABRIC_SALES
+              metadata_validation_mode: PREFLIGHT

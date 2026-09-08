@@ -25,3 +25,4 @@ resources:
             job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
             job_parameters:
               source_system_id: CBS
+              metadata_validation_mode: PREFLIGHT

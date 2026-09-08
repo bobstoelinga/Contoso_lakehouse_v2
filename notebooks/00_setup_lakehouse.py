@@ -272,4 +272,15 @@ if issues:
     for issue in issues:
         print(f"[{issue.category}] {issue.entity}: {issue.message}")
     raise ValueError(f"{len(issues)} metadata-problemen gevonden.")
+metadata_version = spark.sql(
+    f"SELECT metadata_version FROM {settings.meta_catalog}.audit.audit_metadata_version "
+    "ORDER BY deployed_at DESC LIMIT 1"
+).first().metadata_version
+spark.sql(
+    f"""
+    INSERT INTO {settings.meta_catalog}.audit.audit_metadata_validation VALUES (
+      '{metadata_version}', 'SUCCESS', current_timestamp(),
+      'metadata-validator-v1', '{ctx.job_run_id}')
+    """
+)
 print("Metadata-validatie OK")

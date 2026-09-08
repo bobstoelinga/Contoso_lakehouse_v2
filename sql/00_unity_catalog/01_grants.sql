@@ -8,6 +8,9 @@ GRANT USE CATALOG, READ VOLUME                        ON CATALOG raw_${env}     
 GRANT USE SCHEMA                                      ON SCHEMA  raw_${env}.sales        TO `${service_principal}`;
 GRANT WRITE VOLUME                                    ON VOLUME  raw_${env}.sales.checkpoints TO `${service_principal}`;
 GRANT WRITE VOLUME                                    ON VOLUME  raw_${env}.sales.quarantine  TO `${service_principal}`;
+GRANT USE CATALOG                                     ON CATALOG control_${env}          TO `${service_principal}`;
+GRANT USE SCHEMA                                      ON SCHEMA  control_${env}.platform TO `${service_principal}`;
+GRANT WRITE VOLUME                                    ON VOLUME  control_${env}.platform.checkpoints TO `${service_principal}`;
 
 GRANT ALL PRIVILEGES ON CATALOG contoso_meta_${env}    TO `${service_principal}`;
 GRANT ALL PRIVILEGES ON CATALOG contoso_bronze_${env}  TO `${service_principal}`;

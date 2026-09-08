@@ -1,11 +1,11 @@
-# Handmatige beheeractie voor gecontroleerd herplannen van een dead-letter work-item.
+# Handmatige beheeractie voor gecontroleerd herplannen van een dead-letter of stale work-item.
 resources:
   jobs:
     requeue_dead_letter_work_item:
       name: "[${var.env}] Contoso - Requeue Dead Letter"
       description: >-
-        Heropent uitsluitend een DEAD_LETTER work-item met verplichte reden,
-        actor en approval-reference.
+        Heropent uitsluitend een DEAD_LETTER of stale RUNNING work-item met
+        verplichte reden, actor en approval-reference.
       max_concurrent_runs: 1
 
       parameters:

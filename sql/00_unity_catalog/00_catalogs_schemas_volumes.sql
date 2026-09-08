@@ -77,7 +77,19 @@ CREATE VOLUME IF NOT EXISTS raw_${env}.fabric_sales.quarantine
   COMMENT 'Onleesbare of corrupte Fabric Sales-bestanden.';
 
 -- -----------------------------------------------------------------------------
--- 2. Metadata (control framework)
+-- 2. Control (duurzame workflowstatus)
+-- -----------------------------------------------------------------------------
+CREATE CATALOG IF NOT EXISTS control_${env}
+  COMMENT 'Duurzame control-plane opslag voor checkpoints en schema-informatie.';
+
+CREATE SCHEMA IF NOT EXISTS control_${env}.platform
+  COMMENT 'Platformbrede operationele opslag.';
+
+CREATE VOLUME IF NOT EXISTS control_${env}.platform.checkpoints
+  COMMENT 'Auto Loader checkpoints en schema locations, gescheiden van landingretentie.';
+
+-- -----------------------------------------------------------------------------
+-- 3. Metadata (control framework)
 -- -----------------------------------------------------------------------------
 CREATE CATALOG IF NOT EXISTS contoso_meta_${env}
   COMMENT 'Metadata-gedreven control framework: configuratie, status en audit.';

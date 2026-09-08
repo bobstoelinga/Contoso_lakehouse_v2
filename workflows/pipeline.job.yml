@@ -21,6 +21,8 @@ resources:
       parameters:
         - name: source_system_id
           default: ${var.source_system_id}
+        - name: metadata_validation_mode
+          default: FULL
 
       trigger:
         # Auto Loader start Bronze zodra er bestanden in het landing volume staan.
@@ -41,6 +43,7 @@ resources:
             base_parameters:
               env: ${var.env}
               repo_root: ${workspace.file_path}
+              validation_mode: "{{job.parameters.metadata_validation_mode}}"
 
         # ------------------------------------------------------------------
         - task_key: plan_bronze_fanout
@@ -65,22 +68,17 @@ resources:
         # ------------------------------------------------------------------
         - task_key: bronze_ingest
           depends_on: [{ task_key: plan_bronze_fanout }]
-          for_each_task:
-            inputs: "{{tasks.plan_bronze_fanout.values.bronze_inputs}}"
-            concurrency: ${var.bronze_parallelism}
-            task:
-              task_key: bronze_object
-              max_retries: 3
-              min_retry_interval_millis: 60000
-              notebook_task:
-                notebook_path: ../notebooks/10_bronze_autoloader.py
-                base_parameters:
-                  env: ${var.env}
-                  source_system_id: "{{job.parameters.source_system_id}}"
-                  source_object_id: "{{input.source_object_id}}"
-                  batch_id: "{{tasks.plan_bronze_fanout.values.batch_id}}"
-                  mode: once
-                  repo_root: ${workspace.file_path}
+          max_retries: 3
+          min_retry_interval_millis: 60000
+          notebook_task:
+            notebook_path: ../notebooks/10_bronze_autoloader.py
+            base_parameters:
+              env: ${var.env}
+              source_system_id: "{{job.parameters.source_system_id}}"
+              bronze_object_ids: "{{tasks.plan_bronze_fanout.values.bronze_object_ids}}"
+              batch_id: "{{tasks.plan_bronze_fanout.values.batch_id}}"
+              mode: once
+              repo_root: ${workspace.file_path}
 
         # ------------------------------------------------------------------
         - task_key: delivery_gate

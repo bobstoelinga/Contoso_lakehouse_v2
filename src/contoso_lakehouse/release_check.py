@@ -102,6 +102,41 @@ def validate_seed_release(seed_dir: str | Path) -> tuple[str, list[str]]:
     return metadata_version(records_by_table), issues
 
 
+def validate_onboarding_package(package_dir: str | Path, scope: str) -> list[str]:
+    """Validate a scoped onboarding draft without treating it as a full release."""
+    directory = Path(package_dir)
+    required = {
+        "BRON_ONLY": {
+            "meta_source_system.json", "meta_source_object.json",
+            "meta_source_connector.json", "meta_mapping.json", "meta_quality_rule.json",
+        },
+        "BRON_AND_VAULT": {
+            "meta_source_system.json", "meta_source_object.json",
+            "meta_source_connector.json", "meta_mapping.json", "meta_quality_rule.json",
+            "meta_dv_entity.json", "meta_dv_mapping.json",
+        },
+        "END_TO_END_GOLD": set(_SEED_FILES.values()),
+    }.get(scope)
+    if required is None:
+        return [f"Onbekende onboarding scope: {scope}"]
+    issues: list[str] = []
+    for filename in required:
+        path = directory / filename
+        if not path.exists():
+            issues.append(f"{scope}: ontbrekend bestand {filename}")
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            issues.append(f"{filename}: niet leesbare JSON: {exc}")
+            continue
+        if not isinstance(value, list):
+            issues.append(f"{filename}: root moet een JSON-array zijn.")
+        if any(record.get("is_active") for record in value if isinstance(record, dict)):
+            issues.append(f"{filename}: onboardingdossier mag geen actieve records bevatten.")
+    return issues
+
+
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     version, issues = validate_seed_release(root / "metadata" / "seed")

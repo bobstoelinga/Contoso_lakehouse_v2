@@ -47,6 +47,7 @@ resources:
             job_id: ${resources.jobs.contoso_lakehouse_pipeline.id}
             job_parameters:
               source_system_id: SALES
+              metadata_validation_mode: PREFLIGHT
 
         - task_key: load_fabric_sales_to_gold
           depends_on: [{ task_key: generate_sales_delivery }]

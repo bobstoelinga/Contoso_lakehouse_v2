@@ -26,8 +26,8 @@
     "bronze_table": "br_customers",
     "bronze_partition_columns": ["_delivery_date"],
 
-    "checkpoint_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_customers/_checkpoint",
-    "schema_location_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_customers/_schema",
+    "checkpoint_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_customers/_checkpoint",
+    "schema_location_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_customers/_schema",
     "schema_evolution_mode": "addNewColumns",
     "max_files_per_trigger": 1000,
 
@@ -73,8 +73,8 @@
     "bronze_table": "br_products",
     "bronze_partition_columns": ["_delivery_date"],
 
-    "checkpoint_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_products/_checkpoint",
-    "schema_location_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_products/_schema",
+    "checkpoint_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_products/_checkpoint",
+    "schema_location_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_products/_schema",
     "schema_evolution_mode": "addNewColumns",
     "max_files_per_trigger": 1000,
 
@@ -118,8 +118,8 @@
     "bronze_table": "br_orders",
     "bronze_partition_columns": ["_delivery_date"],
 
-    "checkpoint_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_orders/_checkpoint",
-    "schema_location_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_orders/_schema",
+    "checkpoint_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_orders/_checkpoint",
+    "schema_location_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_orders/_schema",
     "schema_evolution_mode": "addNewColumns",
     "max_files_per_trigger": 1000,
 
@@ -163,8 +163,8 @@
     "bronze_table": "br_returns",
     "bronze_partition_columns": ["_delivery_date"],
 
-    "checkpoint_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_returns/_checkpoint",
-    "schema_location_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_returns/_schema",
+    "checkpoint_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_returns/_checkpoint",
+    "schema_location_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_returns/_schema",
     "schema_evolution_mode": "addNewColumns",
     "max_files_per_trigger": 1000,
 
@@ -202,8 +202,8 @@
 
     "bronze_catalog": "contoso_bronze_${env}", "bronze_schema": "sales", "bronze_table": "br_employees",
     "bronze_partition_columns": ["_delivery_date"],
-    "checkpoint_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_employees/_checkpoint",
-    "schema_location_path": "/Volumes/control_${env}/_checkpoints/sales/bronze/br_employees/_schema",
+    "checkpoint_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_employees/_checkpoint",
+    "schema_location_path": "/Volumes/control_${env}/platform/checkpoints/sales/bronze/br_employees/_schema",
     "schema_evolution_mode": "addNewColumns", "max_files_per_trigger": 1000,
     "quality_catalog": "contoso_quality_${env}", "quality_schema": "sales", "quality_table": "qa_employees",
     "reject_catalog": "contoso_reject_${env}", "reject_schema": "sales", "reject_table": "rj_employees",
@@ -336,8 +336,8 @@
     "file_format": "json",
     "reader_options": { "multiLine": "false" },
     "load_strategy": "SNAPSHOT_SCD2",
-    "business_key_columns": ["holiday_date", "country_code", "holiday_name"],
-    "change_tracking_columns": ["local_name", "global_holiday", "holiday_types"],
+    "business_key_columns": ["date", "countryCode", "name"],
+    "change_tracking_columns": ["localName", "global", "types"],
     "deleted_flag_column": null,
     "delete_semantics": "NONE",
     "absence_means_delete": false,

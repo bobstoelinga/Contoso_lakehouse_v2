@@ -242,6 +242,33 @@ CREATE TABLE IF NOT EXISTS audit_metadata_version (
 USING DELTA
 COMMENT 'Onveranderlijke registratie van elke gedeployde metadatarelease.';
 
+CREATE TABLE IF NOT EXISTS audit_metadata_validation (
+  metadata_version      STRING    NOT NULL,
+  validation_status     STRING    NOT NULL COMMENT 'SUCCESS | FAILED',
+  validated_at          TIMESTAMP NOT NULL,
+  validator_version     STRING    NOT NULL,
+  databricks_job_run_id STRING,
+  CONSTRAINT pk_metadata_validation PRIMARY KEY (metadata_version, validated_at) RELY
+)
+USING DELTA
+COMMENT 'Bewijs dat de volledige actieve metadatarelease succesvol is gevalideerd.';
+
+CREATE TABLE IF NOT EXISTS audit_onboarding_draft (
+  draft_id              STRING    NOT NULL,
+  source_system_id      STRING    NOT NULL,
+  source_object_id      STRING    NOT NULL,
+  onboarding_scope      STRING    NOT NULL COMMENT 'BRON_ONLY | BRON_AND_VAULT | END_TO_END_GOLD',
+  draft_status          STRING    NOT NULL COMMENT 'DRAFT | READY_FOR_PR | APPROVED | REJECTED',
+  change_reference      STRING,
+  components_json       STRING    NOT NULL,
+  created_by            STRING    NOT NULL,
+  created_at            TIMESTAMP NOT NULL,
+  updated_at            TIMESTAMP NOT NULL,
+  CONSTRAINT pk_onboarding_draft PRIMARY KEY (draft_id) RELY
+)
+USING DELTA
+COMMENT 'Persistente onboardingdossiers; geen directe activatie van bronmetadata.';
+
 -- -----------------------------------------------------------------------------
 -- 5. Kwaliteitsresultaten
 -- -----------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 12 - Dead-letter work-item herplannen
+# MAGIC # 12 - Work-item herplannen
 # MAGIC Operatoractie met verplichte reden en approval-reference. De volgende
 # MAGIC pipeline-run claimt het heropende work-item; dit notebook voert zelf niets uit.
 

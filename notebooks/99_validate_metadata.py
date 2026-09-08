@@ -9,6 +9,7 @@
 
 dbutils.widgets.text("env", "dev")
 dbutils.widgets.text("repo_root", "/Workspace/Repos/contoso/Contoso_lakehouse_v2")
+dbutils.widgets.dropdown("validation_mode", "FULL", ["FULL", "PREFLIGHT"])
 
 # COMMAND ----------
 
@@ -25,6 +26,27 @@ settings = Settings(env=dbutils.widgets.get("env"))
 ctx = RunContext.create(settings)
 repo = MetadataRepository(spark, settings)
 validator = MetadataValidator(spark, repo, settings)
+validation_mode = dbutils.widgets.get("validation_mode")
+metadata_version = spark.sql(
+    f"SELECT metadata_version FROM {settings.meta_catalog}.audit.audit_metadata_version "
+    "ORDER BY deployed_at DESC LIMIT 1"
+).first().metadata_version
+
+if validation_mode == "PREFLIGHT":
+    validated = spark.sql(
+        f"""
+        SELECT count(*) AS n
+        FROM {settings.meta_catalog}.audit.audit_metadata_validation
+        WHERE metadata_version = '{metadata_version}'
+          AND validation_status = 'SUCCESS'
+        """
+    ).first().n
+    if not validated:
+        raise ValueError(
+            f"Geen geslaagde volledige metadata-preflight voor release {metadata_version}."
+        )
+    print(f"Volledige metadata-preflight aanwezig voor {metadata_version}.")
+    dbutils.notebook.exit("PREFLIGHT_OK")
 
 # COMMAND ----------
 
@@ -47,4 +69,11 @@ if issues:
     for issue in issues:
         print(f"[{issue.category}] {issue.entity}: {issue.message}")
     raise ValueError(f"{len(issues)} metadata-problemen gevonden.")
+spark.sql(
+        f"""
+        INSERT INTO {settings.meta_catalog}.audit.audit_metadata_validation VALUES (
+            '{metadata_version}', 'SUCCESS', current_timestamp(),
+            'metadata-validator-v1', '{ctx.job_run_id}')
+        """
+)
 print("Alle expressies compileren.")

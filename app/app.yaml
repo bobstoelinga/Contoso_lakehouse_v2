@@ -1,0 +1,13 @@
+command:
+  - streamlit
+  - run
+  - streamlit_app.py
+env:
+  - name: CONTOSO_REQUEUE_DEAD_LETTER_WORK_ITEM_JOB_ID
+    value: "278471700078249"
+  - name: CONTOSO_RELEASE_QUARANTINED_DELIVERY_JOB_ID
+    value: "831712812051884"
+  - name: CONTOSO_SUPERSEDE_DELIVERY_JOB_ID
+    value: "3575692008491"
+  - name: CONTOSO_LAKEHOUSE_MAINTENANCE_JOB_ID
+    value: "365753892458002"

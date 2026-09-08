@@ -25,6 +25,7 @@ from contoso_lakehouse.quality import QualityBatchQuarantined, QualityEngine
 from contoso_lakehouse.reconciliation import ReconciliationResult
 from contoso_lakehouse.release_check import validate_seed_release
 from contoso_lakehouse.seed import metadata_version
+from contoso_lakehouse.release_check import validate_onboarding_package
 from contoso_lakehouse.sqlutil import safe_identifier
 from contoso_lakehouse.validation import MetadataValidator
 
@@ -149,6 +150,15 @@ def test_metadata_version_is_deterministic_across_json_key_order():
     reordered = {"meta_source_object": [{"load_order": 10, "object_name": "orders"}]}
 
     assert metadata_version(first) == metadata_version(reordered)
+
+
+def test_scoped_onboarding_package_validation_keeps_partials_safe(tmp_path):
+    (tmp_path / "meta_source_system.json").write_text('[{"source_system_id":"CRM","is_active":false}]', encoding="utf-8")
+    (tmp_path / "meta_source_object.json").write_text('[{"source_object_id":"CRM.CUSTOMERS","is_active":false}]', encoding="utf-8")
+    for filename in ("meta_source_connector.json", "meta_mapping.json", "meta_quality_rule.json"):
+        (tmp_path / filename).write_text("[]", encoding="utf-8")
+    assert validate_onboarding_package(tmp_path, "BRON_ONLY") == []
+    assert validate_onboarding_package(tmp_path, "BRON_AND_VAULT")
 
 
 def test_local_release_check_accepts_the_complete_git_seed_release():
@@ -930,7 +940,7 @@ def test_quarantine_release_is_auditable_and_limited_to_quarantined_deliveries()
     assert "release_quarantined_delivery" in workflow
 
 
-def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
+def test_serverless_pipeline_uses_shared_bronze_compute():
     workflow = PIPELINE_WORKFLOW.read_text(encoding="utf-8")
     planner = (
         Path(__file__).resolve().parents[1] / "notebooks" / "06_plan_bronze_fanout.py"
@@ -943,13 +953,32 @@ def test_serverless_pipeline_fans_out_bronze_with_bounded_concurrency():
     assert "task_key: register_delivery_manifests" in workflow
     assert "notebook_path: ../notebooks/04_register_delivery_manifests.py" in workflow
     assert "depends_on: [{ task_key: register_delivery_manifests }]" in workflow
-    assert "for_each_task:" in workflow
-    assert "{{tasks.plan_bronze_fanout.values.bronze_inputs}}" in workflow
-    assert "concurrency: ${var.bronze_parallelism}" in workflow
+    assert "for_each_task:" not in workflow
+    assert 'bronze_object_ids: "{{tasks.plan_bronze_fanout.values.bronze_object_ids}}"' in workflow
+    assert "max_retries: 3" in workflow
     assert "name: source_system_id" in workflow
     assert 'source_system_id: "{{job.parameters.source_system_id}}"' in workflow
     assert "currentRunId" not in planner
-    assert "taskValues.set" not in bronze
+    assert 'dbutils.widgets.text("bronze_object_ids", "[]")' in bronze
+    assert "json.loads" in bronze
+    assert "for object_id in object_ids" in bronze
+
+
+def test_metadata_preflight_is_fingerprint_bound_and_full_by_default():
+    workflow = PIPELINE_WORKFLOW.read_text(encoding="utf-8")
+    validator = (
+        Path(__file__).resolve().parents[1] / "notebooks" / "99_validate_metadata.py"
+    ).read_text(encoding="utf-8")
+    audit_ddl = (
+        Path(__file__).resolve().parents[1] / "sql" / "01_metadata" / "11_audit_model.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "name: metadata_validation_mode" in workflow
+    assert "default: FULL" in workflow
+    assert 'dbutils.widgets.dropdown("validation_mode", "FULL"' in validator
+    assert "audit_metadata_validation" in validator
+    assert "metadata_version" in validator
+    assert "audit_metadata_validation" in audit_ddl
 
 
 def test_pipeline_reconciles_quality_before_vault_processing():

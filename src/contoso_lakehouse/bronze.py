@@ -76,15 +76,17 @@ class BronzeLoader:
         def handler(batch_df: DataFrame, _batch_id: int) -> None:
             if batch_df.isEmpty():
                 return
-            deliveries = [
-                r["_delivery_id"]
-                for r in batch_df.select("_delivery_id").distinct().collect()
-            ]
+            delivery_stats = {
+                row["_delivery_id"]: (row["rows"], row["files"])
+                for row in batch_df.groupBy("_delivery_id").agg(
+                    F.count("*").alias("rows"),
+                    F.countDistinct("_source_file_path").alias("files"),
+                ).collect()
+            }
             # Chronologisch verwerken; anders raakt SCD2-historie corrupt.
-            for delivery_id in sorted(deliveries):
+            for delivery_id in sorted(delivery_stats):
+                rows, files = delivery_stats[delivery_id]
                 slice_df = batch_df.where(F.col("_delivery_id") == delivery_id)
-                rows = slice_df.count()
-                files = slice_df.select("_source_file_path").distinct().count()
                 self._register(obj, delivery_id, slice_df)
                 new_columns = self._new_columns(obj, slice_df)
                 try:

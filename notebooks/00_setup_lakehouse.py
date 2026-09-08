@@ -282,12 +282,37 @@ def load_sql_script_registry() -> None:
     from pyspark.sql.types import StringType, StructField, StructType
 
     rows = []
-    bronze_objects = {
-        row.bronze_table: row.source_object_id
-        for row in spark.sql(
-            f"SELECT source_object_id, bronze_table FROM {settings.meta_catalog}.metadata.meta_source_object"
-        ).collect()
-    }
+    source_by_identifier = {}
+    for row in spark.sql(
+        f"""
+        SELECT source_object_id, source_system_id, object_name, bronze_table,
+               quality_table, reject_table
+        FROM {settings.meta_catalog}.metadata.meta_source_object
+        """
+    ).collect():
+        for identifier in (row.object_name, row.bronze_table, row.quality_table, row.reject_table):
+            if identifier:
+                source_by_identifier.setdefault(identifier.lower(), set()).add(row.source_object_id)
+    for row in spark.sql(
+        f"""
+        SELECT m.source_object_id, e.target_table
+        FROM {settings.meta_catalog}.metadata.meta_dv_mapping m
+        JOIN {settings.meta_catalog}.metadata.meta_dv_entity e
+          ON e.dv_entity_id = m.dv_entity_id
+        """
+    ).collect():
+        if row.target_table:
+            source_by_identifier.setdefault(row.target_table.lower(), set()).add(row.source_object_id)
+    for row in spark.sql(
+        f"""
+        SELECT ge.target_table, so.source_object_id
+        FROM {settings.meta_catalog}.metadata.meta_gold_entity ge
+        JOIN {settings.meta_catalog}.metadata.meta_source_object so
+          ON so.source_system_id = ge.source_system_id
+        """
+    ).collect():
+        if row.target_table:
+            source_by_identifier.setdefault(row.target_table.lower(), set()).add(row.source_object_id)
     for target_layer, relative_path in SCRIPT_REGISTRY.items():
         body = Path(f"{repo_root}/{relative_path}").read_text(encoding="utf-8")
         checksum = hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -304,23 +329,26 @@ def load_sql_script_registry() -> None:
             "approved_by": "GIT_DEPLOYMENT",
         }
         rows.append(base_record)
-        if target_layer == "BRONZE":
-            for statement in split_sql_statements(body):
-                match = re.search(r"CREATE TABLE IF NOT EXISTS\s+br_([A-Za-z0-9_]+)", statement, re.IGNORECASE)
-                if not match:
-                    continue
-                source_object_id = bronze_objects.get(f"br_{match.group(1)}")
-                if not source_object_id:
-                    continue
-                statement_checksum = hashlib.sha256(statement.encode("utf-8")).hexdigest()
-                rows.append({
-                    **base_record,
-                    "script_id": f"{target_layer}:{source_object_id}",
-                    "source_object_id": source_object_id,
-                    "script_body": statement,
-                    "script_version": statement_checksum[:12],
-                    "script_checksum": statement_checksum,
-                })
+        blocks_by_source = {}
+        for statement in split_sql_statements(body):
+            statement_sources = set()
+            lowered_statement = statement.lower()
+            for identifier, source_ids in source_by_identifier.items():
+                if re.search(rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])", lowered_statement):
+                    statement_sources.update(source_ids)
+            for source_object_id in statement_sources:
+                blocks_by_source.setdefault(source_object_id, []).append(statement)
+        for source_object_id, blocks in blocks_by_source.items():
+            source_body = "\n\n".join(blocks)
+            source_checksum = hashlib.sha256(source_body.encode("utf-8")).hexdigest()
+            rows.append({
+                **base_record,
+                "script_id": f"{target_layer}:{source_object_id}",
+                "source_object_id": source_object_id,
+                "script_body": source_body,
+                "script_version": source_checksum[:12],
+                "script_checksum": source_checksum,
+            })
     schema = StructType([
         StructField("script_id", StringType(), False),
         StructField("source_object_id", StringType(), True),

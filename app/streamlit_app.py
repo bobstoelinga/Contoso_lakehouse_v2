@@ -830,15 +830,18 @@ def metadata_component_editor(
     )
     record = frame[frame[key_column].astype(str) == selected_key].iloc[0].to_dict()
 
+    def is_collection(value: object) -> bool:
+        return pd.api.types.is_list_like(value) and not isinstance(value, (str, bytes, dict))
+
     def text(field: str) -> str:
         value = record.get(field, "")
-        if value is None or (isinstance(value, float) and pd.isna(value)):
+        if value is None or (not is_collection(value) and pd.isna(value)):
             return ""
         return str(value)
 
     def list_text(field: str) -> str:
         value = record.get(field, [])
-        return ", ".join(str(item) for item in value) if isinstance(value, (list, tuple)) else text(field)
+        return ", ".join(str(item) for item in value) if is_collection(value) else text(field)
 
     def integer(field: str, default: int = 100) -> int:
         try:

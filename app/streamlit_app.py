@@ -31,7 +31,9 @@ st.markdown(
     .stApp { background: #f4f7f9; color: var(--ink); }
     [data-testid="stSidebar"] { background: #102a43; }
     [data-testid="stSidebar"] * { color: #e8f1f7; }
-    .hero { background: linear-gradient(120deg,#102a43 0%,#1f5268 62%,#2b7a78 100%); color:white; border-radius:14px; padding:28px 32px; margin:0 0 24px; }
+    .hero { display:flex; align-items:center; gap:24px; background:linear-gradient(120deg,#102a43 0%,#1f5268 62%,#2b7a78 100%); color:white; border-radius:14px; padding:24px 30px; margin:0 0 24px; }
+    .hero-icon { width:112px; height:112px; flex:0 0 112px; }
+    .hero-copy { min-width:0; }
     .hero h1 { font-family:'Aptos Display','Segoe UI',sans-serif; font-size:2.2rem; margin:0 0 8px; letter-spacing:0; }
     .hero p { font-family:'Aptos','Segoe UI',sans-serif; color:#d7e8ef; margin:0 0 6px; font-size:1rem; }
     .hero .ai-credit { font-family:'Aptos','Segoe UI',sans-serif; color:#b9d8df; margin:0; font-size:.88rem; font-weight:700; letter-spacing:.04em; }
@@ -1146,7 +1148,7 @@ if st.sidebar.button("Ververs data"):
 st.sidebar.markdown('<p class="caption">Data ververst maximaal elke 30 seconden.</p>', unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="hero"><h1>Contoso Lakehouse</h1><p>Praktijkexperiment in governance, pipelinecontrole en metadata-orchestratie</p><p class="ai-credit">Developed in VS Code &amp; Databricks with A.I.</p></div>',
+    f'<div class="hero"><img class="hero-icon" src="data:image/svg+xml;base64,{base64.b64encode(open(os.path.join(os.path.dirname(__file__), "contoso-lakehouse-icon.svg"), "rb").read()).decode("ascii")}" alt="Contoso Lakehouse control-plane icon"><div class="hero-copy"><h1>Contoso Lakehouse</h1><p>Praktijkexperiment in governance, pipelinecontrole en metadata-orchestratie</p><p class="ai-credit">Developed in VS Code &amp; Databricks with A.I.</p></div></div>',
     unsafe_allow_html=True,
 )
 

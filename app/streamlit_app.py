@@ -716,7 +716,11 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
 
     def list_value(field: str) -> str:
         value = selected.get(field, [])
-        return ", ".join(str(item) for item in value) if isinstance(value, (list, tuple)) else str(value or "")
+        if pd.api.types.is_list_like(value) and not isinstance(value, (str, bytes, dict)):
+            return ", ".join(str(item) for item in value)
+        if value is None or (not pd.api.types.is_list_like(value) and pd.isna(value)):
+            return ""
+        return str(value)
 
     with st.form(f"edit_etl_{selected_id}"):
         left, right = st.columns(2)

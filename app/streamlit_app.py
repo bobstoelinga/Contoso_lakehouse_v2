@@ -6,6 +6,7 @@ import io
 import zipfile
 import uuid
 import base64
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -232,6 +233,22 @@ def github_api(method: str, path: str, payload: dict | None = None) -> dict:
 def github_script(path: str, branch: str) -> tuple[str, str]:
     result = github_api("GET", f"contents/{path}?ref={urllib.parse.quote(branch)}")
     return base64.b64decode(result["content"]).decode("utf-8"), result["sha"]
+
+
+def sql_sections(content: str) -> list[str]:
+    """Splitst een SQL-bestand in bewerkbare statements zonder de rest te verliezen."""
+    starts = list(re.finditer(r"(?im)^\s*(?:CREATE|ALTER|DROP|MERGE|INSERT|UPDATE|DELETE|SELECT)\b", content))
+    if not starts:
+        return [content]
+    sections = []
+    if starts[0].start() > 0:
+        sections.append(content[:starts[0].start()])
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(content)
+        section = content[match.start():end]
+        if section.strip():
+            sections.append(section)
+    return sections
 
 
 def create_script_pull_request(path: str, content: str, source_object_id: str, description: str) -> str:
@@ -1014,12 +1031,10 @@ def metadata_component_editor(
         st.success(f"{action.capitalize()} opgeslagen als draft: {draft_id}. Review en merge blijven verplicht.")
 
 
-def sql_script_editor(source_object_id: str) -> None:
+def sql_script_editor(source_object_id: str, object_name: str) -> None:
     """Toont repository-SQL en maakt een gecontroleerde Pull Request mogelijk."""
     st.subheader("SQL-logica van bron naar output")
-    st.caption(
-        "SQL wordt uit GitHub geladen. Een wijziging maakt een branch en Pull Request; main en Databricks worden niet rechtstreeks vanuit dit scherm gewijzigd."
-    )
+    st.caption("Filter op bron of tabel, wijzig alleen het gevonden SQL-blok en maak daarna een Pull Request.")
     layer = st.selectbox("SQL-laag", list(SQL_SCRIPT_FILES), key=f"sql_layer_{source_object_id}")
     path = SQL_SCRIPT_FILES[layer]
     branch = os.environ.get("GITHUB_BASE_BRANCH", "main")
@@ -1030,7 +1045,27 @@ def sql_script_editor(source_object_id: str) -> None:
         return
 
     st.caption(f"Bestand: `{path}` | basisbranch: `{branch}` | versie: `{file_sha[:10]}`")
-    edited = st.text_area("SQL-script", value=content, height=460, key=f"sql_content_{source_object_id}_{path}")
+    default_filter = object_name.lower()
+    filter_text = st.text_input("Filter in SQL", value=default_filter, key=f"sql_filter_{source_object_id}_{path}").strip().lower()
+    sections = sql_sections(content)
+    matching_sections = [section for section in sections if not filter_text or filter_text in section.lower()]
+    if not matching_sections:
+        st.warning(f"Geen SQL-blok gevonden voor filter `{filter_text}`.")
+        return
+    section_labels = [section.strip().splitlines()[0][:100] for section in matching_sections]
+    selected_section_index = st.selectbox(
+        "Gevonden SQL-blok",
+        range(len(matching_sections)),
+        format_func=lambda index: section_labels[index],
+        key=f"sql_section_{source_object_id}_{path}",
+    )
+    original_section = matching_sections[selected_section_index]
+    edited = st.text_area(
+        "Geselecteerd SQL-blok",
+        value=original_section,
+        height=460,
+        key=f"sql_content_{source_object_id}_{path}",
+    )
     description = st.text_input(
         "Beschrijving van de wijziging",
         key=f"sql_description_{source_object_id}_{path}",
@@ -1049,7 +1084,8 @@ def sql_script_editor(source_object_id: str) -> None:
             st.error("SQL en een beschrijving van de wijziging zijn verplicht.")
             return
         try:
-            pull_url = create_script_pull_request(path, edited, source_object_id, description)
+            updated_content = content.replace(original_section, edited, 1)
+            pull_url = create_script_pull_request(path, updated_content, source_object_id, description)
             st.success(f"Pull Request aangemaakt: {pull_url}")
         except Exception as exc:
             st.error(f"Pull Request kon niet worden aangemaakt: {exc}")
@@ -1189,7 +1225,10 @@ with etl_tab:
             st.subheader("Gerelateerde ETL-componenten")
             metadata_component_editor(env, selected_source, related_components)
             st.divider()
-            sql_script_editor(str(selected_source["source_object_id"]))
+            sql_script_editor(
+                str(selected_source["source_object_id"]),
+                str(selected_source.get("object_name") or selected_source["source_object_id"]),
+            )
         except Exception as exc:
             st.error(f"Gerelateerde ETL-componenten konden niet worden geladen: {exc}")
 

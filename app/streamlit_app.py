@@ -98,6 +98,13 @@ QUERIES = {
         ORDER BY updated_at DESC
         LIMIT 100
     """,
+    "etl_solutions": """
+        SELECT so.*, ss.source_system_name
+        FROM {meta}.meta_source_object so
+        LEFT JOIN {meta}.meta_source_system ss
+          ON ss.source_system_id = so.source_system_id
+        ORDER BY so.source_system_id, so.source_object_id
+    """,
 }
 
 
@@ -121,7 +128,7 @@ def sql_connection():
 @st.cache_data(ttl=30, show_spinner=False)
 def query(name: str, env: str) -> pd.DataFrame:
     catalog = f"contoso_meta_{env}"
-    statement = QUERIES[name].format(audit=f"{catalog}.audit")
+    statement = QUERIES[name].format(audit=f"{catalog}.audit", meta=f"{catalog}.metadata")
     with sql_connection().cursor() as cursor:
         cursor.execute(statement)
         rows = cursor.fetchall()
@@ -648,6 +655,112 @@ def component_editor() -> None:
     )
 
 
+def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
+    """Laat een bestaande bronflow aanpassen als reviewbare onboarding-draft."""
+    st.subheader("Bestaande ETL-oplossingen")
+    st.caption(
+        "Bekijk actieve en inactieve bronflows. Wijzigingen worden als draft opgeslagen en raken de productiemetadata pas na review en merge."
+    )
+    if solutions.empty:
+        st.info("Geen ETL-oplossingen gevonden in de metadata.")
+        return
+
+    display = solutions[["source_object_id", "source_system_id", "object_name", "load_strategy", "is_active"]].copy()
+    display = display.rename(
+        columns={
+            "source_object_id": "Bronobject",
+            "source_system_id": "Bronsysteem",
+            "object_name": "Object",
+            "load_strategy": "Laadstrategie",
+            "is_active": "Actief",
+        }
+    )
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+    selected_id = st.selectbox("ETL-oplossing", solutions["source_object_id"].tolist(), key="existing_etl_solution")
+    selected = solutions[solutions["source_object_id"] == selected_id].iloc[0].to_dict()
+
+    def list_value(field: str) -> str:
+        value = selected.get(field, [])
+        return ", ".join(str(item) for item in value) if isinstance(value, (list, tuple)) else str(value or "")
+
+    with st.form(f"edit_etl_{selected_id}"):
+        left, right = st.columns(2)
+        with left:
+            object_name = st.text_input("Objectnaam", value=str(selected.get("object_name") or ""))
+            file_pattern = st.text_input("Bestandspatroon", value=str(selected.get("file_pattern") or ""))
+            file_format = st.selectbox(
+                "Bestandsformaat", ["parquet", "json", "csv"],
+                index=["parquet", "json", "csv"].index(str(selected.get("file_format") or "parquet").lower()),
+            )
+            load_strategy = st.selectbox(
+                "Laadstrategie",
+                ["INCREMENTAL_APPEND", "INCREMENTAL_MERGE", "SNAPSHOT_SCD2", "PARTIAL_SNAPSHOT", "FULL_OVERWRITE"],
+                index=["INCREMENTAL_APPEND", "INCREMENTAL_MERGE", "SNAPSHOT_SCD2", "PARTIAL_SNAPSHOT", "FULL_OVERWRITE"].index(
+                    str(selected.get("load_strategy") or "INCREMENTAL_APPEND")
+                ),
+            )
+            business_keys = st.text_input("Business keys", value=list_value("business_key_columns"))
+            change_columns = st.text_input("Kolommen voor wijzigingsdetectie", value=list_value("change_tracking_columns"))
+        with right:
+            delete_semantics = st.selectbox(
+                "Verwijdersemantiek", ["NONE", "SOFT_DELETE_FLAG", "HARD_DELETE"],
+                index=["NONE", "SOFT_DELETE_FLAG", "HARD_DELETE"].index(str(selected.get("delete_semantics") or "NONE")),
+            )
+            schema_drift_policy = st.selectbox(
+                "Schema-driftbeleid",
+                ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS"],
+                index=["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS"].index(
+                    str(selected.get("schema_drift_policy") or "STRICT")
+                ),
+            )
+            owner_team = st.text_input("Verantwoordelijk team", value=str(selected.get("owner_team") or ""))
+            criticality = st.selectbox(
+                "Kritikaliteit", ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                index=["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(str(selected.get("criticality") or "MEDIUM")),
+            )
+            freshness_sla = st.number_input("Freshness-SLA (uur)", min_value=1, value=int(selected.get("freshness_sla_hours") or 24))
+            load_order = st.number_input("Laadvolgorde", min_value=1, value=int(selected.get("load_order") or 100))
+            is_active = st.checkbox("ETL-oplossing actief", value=bool(selected.get("is_active", False)))
+        submitted = st.form_submit_button("Bewaar wijziging als draft", type="primary")
+
+    if submitted:
+        try:
+            edited = dict(selected)
+            edited.update({
+                "object_name": object_name.strip(),
+                "file_pattern": file_pattern.strip(),
+                "file_format": file_format,
+                "load_strategy": load_strategy,
+                "business_key_columns": [item.strip() for item in business_keys.split(",") if item.strip()],
+                "change_tracking_columns": [item.strip() for item in change_columns.split(",") if item.strip()],
+                "delete_semantics": delete_semantics,
+                "schema_drift_policy": schema_drift_policy,
+                "owner_team": owner_team.strip(),
+                "criticality": criticality,
+                "freshness_sla_hours": freshness_sla,
+                "load_order": load_order,
+                "is_active": is_active,
+            })
+            if not edited["object_name"] or not edited["file_pattern"] or not edited["business_key_columns"]:
+                raise ValueError("Objectnaam, bestandspatroon en minimaal één business key zijn verplicht.")
+            if not edited.get("source_system_id"):
+                raise ValueError("Het bronsysteem van deze ETL-oplossing ontbreekt.")
+            draft_id = save_onboarding_draft(
+                env,
+                str(edited["source_system_id"]),
+                selected_id,
+                "EXISTING_ETL_CHANGE",
+                {"meta_source_object.json": [edited]},
+            )
+            st.success(f"Wijziging opgeslagen als draft: {draft_id}. Review en merge blijven verplicht.")
+            st.info("De wijziging staat klaar voor review; de actieve metadata is nog niet aangepast.")
+        except ValueError as exc:
+            st.error(f"ETL-definitie kon niet worden opgeslagen: {exc}")
+        except Exception as exc:
+            st.error(f"ETL-draft kon niet worden opgeslagen: {exc}")
+
+
 st.sidebar.markdown("## Control Room")
 env = st.sidebar.selectbox("Omgeving", ["dev", "tst", "prd"], index=0)
 if st.sidebar.button("Ververs data"):
@@ -667,6 +780,7 @@ try:
     gold = query("gold", env)
     work_items = query("work_items", env)
     onboarding_drafts = query("onboarding_drafts", env)
+    etl_solutions = query("etl_solutions", env)
 except Exception as exc:
     st.error(f"Databricks SQL is niet bereikbaar: {exc}")
     st.info("Configureer een Databricks CLI-profiel of DATABRICKS_SERVER_HOSTNAME, DATABRICKS_HTTP_PATH en DATABRICKS_TOKEN.")
@@ -684,8 +798,8 @@ columns[2].metric("Mislukte runs / 7 dagen", failed_runs, delta_color="inverse")
 columns[3].metric("Actieve Gold-entiteiten", active_gold)
 
 st.markdown('<div class="section-label">Operations</div>', unsafe_allow_html=True)
-overview, delivery_tab, run_tab, process_tab, flow_tab, action_tab = st.tabs(
-    ["Overzicht", "Deliveries", "Runs & Gold", "Processen", "Flow Setup", "Operatoracties"]
+overview, delivery_tab, run_tab, process_tab, flow_tab, etl_tab, action_tab = st.tabs(
+    ["Overzicht", "Deliveries", "Runs & Gold", "Processen", "Flow Setup", "ETL-oplossingen", "Operatoracties"]
 )
 
 with overview:
@@ -761,6 +875,9 @@ with flow_tab:
                 st.success(f"Onboardingdossier opgeslagen: {draft_id}")
             except Exception as exc:
                 st.error(f"Onboardingdossier kon niet worden opgeslagen: {exc}")
+
+with etl_tab:
+    existing_etl_editor(env, etl_solutions)
 
 with action_tab:
     st.subheader("Gecontroleerde operatoracties")

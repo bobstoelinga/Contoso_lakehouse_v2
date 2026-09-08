@@ -135,6 +135,10 @@ CREATE TABLE IF NOT EXISTS meta_retry_policy (
   CONSTRAINT pk_retry_policy PRIMARY KEY (retry_policy_id) RELY
 )
 
+USING DELTA
+COMMENT 'Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in meta_dependency.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
+
 -- -----------------------------------------------------------------------------
 -- 2b. Versiebeheer van uitvoerbare SQL per ETL-component
 -- -----------------------------------------------------------------------------
@@ -157,9 +161,6 @@ CREATE TABLE IF NOT EXISTS meta_sql_script (
 )
 USING DELTA
 COMMENT 'Gecontroleerde SQL-implementaties per ETL-component; alleen ACTIVE wordt door runtime gebruikt.'
-TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
-USING DELTA
-COMMENT 'Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in meta_dependency.'
 TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 
 -- -----------------------------------------------------------------------------

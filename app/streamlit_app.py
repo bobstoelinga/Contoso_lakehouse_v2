@@ -10,6 +10,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
 from datetime import datetime
 
 import pandas as pd
@@ -190,6 +191,40 @@ def query(name: str, env: str, **params: str) -> pd.DataFrame:
         rows = cursor.fetchall()
         columns = [column[0] for column in cursor.description]
     return pd.DataFrame(rows, columns=columns)
+
+
+def load_dashboard_data(env: str) -> dict[str, pd.DataFrame]:
+    query_names = (
+        "deliveries",
+        "breaches",
+        "runs",
+        "gold",
+        "work_items",
+        "onboarding_drafts",
+        "etl_solutions",
+    )
+    attempts = max(1, int(os.environ.get("CONTOSO_SQL_STARTUP_ATTEMPTS", "3")))
+    delay_seconds = max(0.0, float(os.environ.get("CONTOSO_SQL_STARTUP_RETRY_SECONDS", "5")))
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return {name: query(name, env) for name in query_names}
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            sql_connection.clear()
+            wait_seconds = delay_seconds * attempt
+            st.info(
+                f"Databricks SQL wordt gestart of hervat. "
+                f"Nieuwe poging {attempt + 1}/{attempts} over {wait_seconds:g} seconden..."
+            )
+            time.sleep(wait_seconds)
+
+    raise RuntimeError(
+        f"Databricks SQL bleef na {attempts} pogingen onbereikbaar: {last_error}"
+    ) from last_error
 
 
 def save_onboarding_draft(env: str, source_system_id: str, source_object_id: str, scope: str, components: dict) -> str:
@@ -1115,16 +1150,21 @@ st.markdown(
 )
 
 try:
-    deliveries = query("deliveries", env)
-    breaches = query("breaches", env)
-    runs = query("runs", env)
-    gold = query("gold", env)
-    work_items = query("work_items", env)
-    onboarding_drafts = query("onboarding_drafts", env)
-    etl_solutions = query("etl_solutions", env)
+    dashboard_data = load_dashboard_data(env)
+    deliveries = dashboard_data["deliveries"]
+    breaches = dashboard_data["breaches"]
+    runs = dashboard_data["runs"]
+    gold = dashboard_data["gold"]
+    work_items = dashboard_data["work_items"]
+    onboarding_drafts = dashboard_data["onboarding_drafts"]
+    etl_solutions = dashboard_data["etl_solutions"]
 except Exception as exc:
     st.error(f"Databricks SQL is niet bereikbaar: {exc}")
-    st.info("Configureer een Databricks CLI-profiel of DATABRICKS_SERVER_HOSTNAME, DATABRICKS_HTTP_PATH en DATABRICKS_TOKEN.")
+    st.info(
+        "De app heeft meerdere keren geprobeerd Databricks SQL te bereiken. "
+        "Controleer daarna het CLI-profiel, DATABRICKS_SERVER_HOSTNAME, "
+        "DATABRICKS_HTTP_PATH en DATABRICKS_TOKEN."
+    )
     st.stop()
 
 completed = int((deliveries["delivery_status"] == "COMPLETE").sum()) if not deliveries.empty else 0

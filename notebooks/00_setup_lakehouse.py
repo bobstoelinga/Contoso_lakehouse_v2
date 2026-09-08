@@ -408,7 +408,10 @@ def run_registered_script(script_id: str) -> None:
     actual_checksum = hashlib.sha256(row.script_body.encode("utf-8")).hexdigest()
     if actual_checksum != row.script_checksum:
         raise ValueError(f"Checksumcontrole mislukt voor {script_id}.")
-    for statement_number, statement in enumerate(split_sql_statements(row.script_body), start=1):
+    text = row.script_body
+    for placeholder, value in PARAMS.items():
+        text = text.replace(placeholder, value)
+    for statement_number, statement in enumerate(split_sql_statements(text), start=1):
         try:
             spark.sql(statement)
         except Exception as exc:

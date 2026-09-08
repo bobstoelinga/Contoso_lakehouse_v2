@@ -11,6 +11,12 @@ Dit project realiseert een **werkend, aantoonbaar gevalideerd metadata-gedreven 
 
 De runtime en governance-laag zijn Azure Databricks, Unity Catalog en Delta Lake. Microsoft Fabric is aangesloten als werkende SQL-bron: een Fabric SQL Database wordt met JDBC uitgelezen, schrijft een immutable Parquet-levering naar het Databricks Landing Volume en wordt vervolgens door dezelfde metadata-gedreven keten verwerkt. Dit is dus geen native Fabric Lakehouse-implementatie.
 
+De Azure-inrichting die nodig is voor deze werking is vastgelegd in
+[08_azure_inrichting.md](08_azure_inrichting.md). Daarin staan de actuele
+workspace-, storage-, Access Connector-, Event Grid-, SQL Warehouse-,
+identity- en Unity Catalog-specificaties, inclusief de nog te bevestigen
+Azure Resource Manager-eigenschappen voor productie.
+
 De kernketen en de belangrijkste foutscenario's zijn in `dev` bewezen. De Fabric Sales-delivery `FABRIC_SALES|2026-09-06` doorliep succesvol Bronze, delivery-gate, Quality, Reference Data, Gold Historisch en Gold Actueel. Een onafhankelijke read-only controle telde 542 rijen in elk van deze lagen. De lokale regressiesuite eindigde met **131 geslaagde tests**.
 
 De oplossing is geschikt als gevalideerd architectuurprototype en als basis voor een gecontroleerde testomgeving. Productieacceptatie vereist nog bewijzen voor volume, recovery, beveiliging, governance, kosten en operationeel beheer.
@@ -219,6 +225,25 @@ Deze cyclus toont gecontroleerd herstel: brondata is niet aangepast; alle correc
 | Security en privacy | Amber | Least-privilege, PII-classificatie en secretscan formaliseren |
 | Operations en recovery | Amber/rood | Runbooks, replay en RPO/RTO testen |
 | Performance en kosten | Amber | Volume-, DBU- en storagebenchmark uitvoeren |
+
+### Ontwikkelde applicatie: Contoso Control Room
+
+Naast de data-engineeringketen is een operationele webapplicatie ontwikkeld:
+**Contoso Control Room**. Deze Streamlit-applicatie is beschikbaar als
+Databricks App en biedt een read-only overzicht van deliveries, runs, Gold-
+publicaties, kwaliteits- en operationele breaches en openstaande work-items.
+
+De app ondersteunt daarnaast gecontroleerde operatoracties, zoals het opnieuw
+inplannen van dead-letter work-items, het vrijgeven van een quarantained
+delivery en het uitvoeren van onderhoud. Deze acties schrijven niet rechtstreeks
+naar audit-tabellen, maar starten de bestaande Databricks-remediation- en
+maintenance-jobs. Reden, uitvoerder en approval/change-referentie zijn daarbij
+verplicht.
+
+**Open de applicatie:** [Streamlit](https://contoso-control-room-v2-7405619535862062.2.azure.databricks.com/)
+
+De broncode staat in [app/streamlit_app.py](../app/streamlit_app.py) en de
+lokale/deploymentinstructies staan in [app/README.md](../app/README.md).
 
 Het advies is: **nog niet vrijgeven voor productie**, maar het resultaat wel accepteren als werkend en aantoonbaar gevalideerd prototype. Een volgende fase moet gericht zijn op het bewijzen en operationaliseren van niet-functionele productiekwaliteit, niet op ontbrekende basisfunctionaliteit.
 
@@ -492,6 +517,61 @@ Serverless cold start plus één notebooktaak per bronobject. Controleer daarna
 delivery-gate, Quality/reject, Data Vault en de atomische Gold-publicatie. Pas na
 deze succesvolle runtimeketen en een schaal-/hersteltest kan productie-readiness
 opnieuw worden beoordeeld.
+
+## 29. Werkzaamheden 8 september 2026
+
+De operationele en deploymentlaag is verder uitgewerkt. De belangrijkste
+resultaten van vandaag zijn:
+
+- **Contoso Control Room**: een Databricks App voor read-only monitoring van
+  deliveries, runs, Gold-publicaties, kwaliteitsresultaten, SLO-breaches en
+  work-items. Gecontroleerde operatoracties starten bestaande remediation- en
+  maintenance-workflows en vereisen reden, actor en approval/change-reference.
+- **SQL-scriptregistry**: uitvoerbare SQL wordt per script, bronobject en versie
+  geregistreerd in `meta_sql_script`. De registry bewaart de inhoud, checksum,
+  status en herkomst. De setup-job controleert de checksum, resolveert
+  omgevingsparameters en voert alleen de actieve versie uit.
+- **Beheerst wijzigingsproces**: SQL-wijzigingen lopen via
+  `DRAFT -> APPROVED -> ACTIVE -> RETIRED`. De Control Room maakt hiervoor een
+  GitHub Pull Request; pas na merge, deployment en een succesvolle setup- en
+  validatierun wordt een versie actief.
+- **SQL-details per ETL-laag**: Bronze-DDL en overige geregistreerde ETL-blokken
+  kunnen gericht per bronobject worden bekeken. Daarmee wordt voorkomen dat een
+  operator onnodig alle SQL of productiemetadata direct kan wijzigen.
+- **Bewijs en overdracht**: de Control Room is vastgelegd met schermafdrukken in
+  Bijlage A. De Azure-resourceinventaris en de nog openstaande ARM-controles zijn
+  opgenomen in [08_azure_inrichting.md](08_azure_inrichting.md).
+
+Deze onderdelen maken de control plane bruikbaar voor dagelijks beheer, maar
+veranderen de productie-readiness niet: netwerkisolatie, formele Azure-RBAC,
+monitoring, kostenbeheersing en recovery moeten nog aantoonbaar worden getest.
+
+## 30. Azure-inrichting: requirements en acceptatiecriteria
+
+Onderstaande requirements zijn nodig om de oplossing in Azure Databricks te
+deployen en beheerd te laten draaien. De status verwijst naar de actuele
+prototype-inventarisatie; `open` betekent dat het vereiste nog rechtstreeks uit
+Azure Resource Manager moet worden bevestigd.
+
+| ID | Azure-requirement | Acceptatiecriterium | Status |
+|---|---|---|---|
+| AZ-01 | Azure Databricks-workspace | Workspace-URL, regio, SKU en pricing tier zijn vastgelegd per omgeving | Deels geverifieerd; regio/SKU open |
+| AZ-02 | Storage account en landingzone | `contosolake3` bevat gescheiden landing-, checkpoint-, schema- en quarantinepaden per omgeving | Prototype ingericht; securitydetails open |
+| AZ-03 | Access Connector | Managed identity is gekoppeld aan de workspace en gebruikt voor Unity Catalog-opslag | Resource bevestigd; object-ID en RBAC-scope open |
+| AZ-04 | Unity Catalog | Metastore, storage credentials, external locations, volumes en omgevingscatalogi zijn aanwezig | `dev` geverifieerd; volledige omgevingenset te bevestigen |
+| AZ-05 | Storage security | Alleen de benodigde Databricks-identities hebben least-privilege lees-/schrijfrechten | Rollen, scopes, firewall en TLS open |
+| AZ-06 | Event Grid | Storage-events triggeren file-arrival-verwerking met filters en dead-lettering | Topic bekend; subscriptiondetails open |
+| AZ-07 | Identities en RBAC | ETL-service principal, App-service principal, engineers, BI en stewards hebben gescheiden rechten | Principals en functionele grants bekend; Azure-RBAC open |
+| AZ-08 | SQL Warehouse | Control Room kan met secret-backed configuratie verbinden met Warehouse `06c37b8b16646405` | Geconfigureerd in prototype |
+| AZ-09 | Secrets | Tokens, OAuth-configuratie en JDBC/HTTP-credentials staan buiten Git in secret-backed environment variables | Vereiste vastgelegd; productiecontrole open |
+| AZ-10 | Deployment | `validate`, `deploy`, setup, metadata-validatie en App-deployment zijn reproduceerbaar per target | `dev` gevalideerd; `tst`/`prd` nog te bewijzen |
+| AZ-11 | Netwerk en observability | Private connectivity, publieke toegang, diagnostic settings, Log Analytics en retentie zijn vastgelegd | Open ARM-controle |
+| AZ-12 | Kosten en recovery | Budget, tags, cost center, retentie, backup/replay en RPO/RTO zijn vastgesteld en getest | Open productie-eis |
+
+Voor productieacceptatie moeten minimaal de open criteria AZ-01, AZ-03,
+AZ-05, AZ-06, AZ-07, AZ-10, AZ-11 en AZ-12 met Azure Portal- of
+`az resource list`-bewijs worden aangevuld. Tot die tijd is de Azure-inrichting
+een gevalideerde `dev`-basis, geen volledig productieontwerp.
 
 De lokale release-gate bleef geldig met fingerprint
 `7996f205699885cdebc7b488a9f384b2e2fac9b5688873a04c2eed1e1b6ef61a`.

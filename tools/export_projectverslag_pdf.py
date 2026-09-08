@@ -13,6 +13,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     KeepTogether,
+    Image,
     PageBreak,
     Paragraph,
     Preformatted,
@@ -22,6 +23,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.graphics.shapes import Drawing, Line, Rect, String
+from reportlab.lib.utils import ImageReader
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -372,6 +374,39 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
         else:
             story.append(Paragraph(inline_markup(line), styles["BodyReport"]))
         index += 1
+
+    screenshots = [
+        ("Overzicht", "overzicht.png"),
+        ("Deliveries", "deliveries.png"),
+        ("Runs & Gold", "runs-gold.png"),
+        ("Processen", "processen.png"),
+        ("Flow Setup", "flow-setup.png"),
+        ("Operatoracties", "operatoracties.png"),
+    ]
+    screenshot_dir = ROOT / "docs" / "app-screenshots"
+    available_screenshots = [
+        (label, screenshot_dir / filename)
+        for label, filename in screenshots
+        if (screenshot_dir / filename).exists()
+    ]
+    if available_screenshots:
+        story.append(PageBreak())
+        story.append(Paragraph("Bijlage A - Schermafdrukken van de Streamlit-app", styles["H1Report"]))
+        story.append(Paragraph(
+            "De volgende schermafdrukken tonen de verschillende pagina's van de Contoso Control Room.",
+            styles["BodyReport"],
+        ))
+        for label, screenshot_path in available_screenshots:
+            story.append(Paragraph(label, styles["H2Report"]))
+            image_width, image_height = ImageReader(str(screenshot_path)).getSize()
+            scale = min((174 * mm) / image_width, (235 * mm) / image_height)
+            story.append(Image(
+                str(screenshot_path),
+                width=image_width * scale,
+                height=image_height * scale,
+                hAlign="CENTER",
+            ))
+            story.append(Spacer(1, 8))
     return story
 
 

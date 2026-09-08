@@ -5,6 +5,10 @@ import json
 import io
 import zipfile
 import uuid
+import base64
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime
 
 import pandas as pd
@@ -137,6 +141,16 @@ QUERIES = {
     """,
 }
 
+SQL_SCRIPT_FILES = {
+    "Bronze-tabellen": "sql/02_bronze/20_bronze_tables.sql",
+    "Quality-tabellen": "sql/03_quality_reject/30_quality_tables.sql",
+    "Reject-tabellen": "sql/03_quality_reject/31_reject_tables.sql",
+    "Raw Data Vault": "sql/04_data_vault/40_raw_vault.sql",
+    "Business Vault": "sql/04_data_vault/41_business_vault.sql",
+    "Gold historisch": "sql/05_gold/50_gold_historical.sql",
+    "Gold actueel": "sql/05_gold/51_gold_current.sql",
+}
+
 
 @st.cache_resource
 def sql_connection():
@@ -192,6 +206,64 @@ def run_operator_job(action: str, params: dict[str, str]) -> int:
         raise RuntimeError(f"Geen job-ID geconfigureerd voor actie {action}.")
     run = WorkspaceClient().jobs.run_now(job_id=int(job_id), job_parameters=params)
     return int(run.run_id)
+
+
+def github_api(method: str, path: str, payload: dict | None = None) -> dict:
+    """Leest of schrijft repository-inhoud via GitHub; schrijft alleen met token."""
+    repository = os.environ.get("GITHUB_REPOSITORY", "bobstoelinga/Contoso_lakehouse_v2")
+    token = os.environ.get("GITHUB_TOKEN")
+    url = f"https://api.github.com/repos/{repository}/{path}"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "contoso-control-room"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    body = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"GitHub API {exc.code}: {detail[:500]}") from exc
+
+
+def github_script(path: str, branch: str) -> tuple[str, str]:
+    result = github_api("GET", f"contents/{path}?ref={urllib.parse.quote(branch)}")
+    return base64.b64decode(result["content"]).decode("utf-8"), result["sha"]
+
+
+def create_script_pull_request(path: str, content: str, source_object_id: str, description: str) -> str:
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN is niet geconfigureerd voor scriptwijzigingen.")
+    base = os.environ.get("GITHUB_BASE_BRANCH", "main")
+    branch = f"etl/{source_object_id.lower().replace('.', '-')}-{uuid.uuid4().hex[:8]}"
+    base_ref = github_api("GET", f"git/ref/heads/{urllib.parse.quote(base)}")
+    github_api("POST", "git/refs", {"ref": f"refs/heads/{branch}", "sha": base_ref["object"]["sha"]})
+    current = github_api("GET", f"contents/{path}?ref={urllib.parse.quote(base)}")
+    github_api(
+        "PUT",
+        f"contents/{path}",
+        {
+            "message": f"Update ETL SQL for {source_object_id}",
+            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "branch": branch,
+            "sha": current["sha"],
+        },
+    )
+    pull = github_api(
+        "POST",
+        "pulls",
+        {
+            "title": f"Update ETL SQL for {source_object_id}",
+            "head": branch,
+            "base": base,
+            "body": description,
+        },
+    )
+    return pull["html_url"]
 
 
 def action_form(action: str, title: str, fields: tuple[str, ...]) -> None:
@@ -942,6 +1014,47 @@ def metadata_component_editor(
         st.success(f"{action.capitalize()} opgeslagen als draft: {draft_id}. Review en merge blijven verplicht.")
 
 
+def sql_script_editor(source_object_id: str) -> None:
+    """Toont repository-SQL en maakt een gecontroleerde Pull Request mogelijk."""
+    st.subheader("SQL-logica van bron naar output")
+    st.caption(
+        "SQL wordt uit GitHub geladen. Een wijziging maakt een branch en Pull Request; main en Databricks worden niet rechtstreeks vanuit dit scherm gewijzigd."
+    )
+    layer = st.selectbox("SQL-laag", list(SQL_SCRIPT_FILES), key=f"sql_layer_{source_object_id}")
+    path = SQL_SCRIPT_FILES[layer]
+    branch = os.environ.get("GITHUB_BASE_BRANCH", "main")
+    try:
+        content, file_sha = github_script(path, branch)
+    except Exception as exc:
+        st.error(f"SQL-script kon niet uit GitHub worden geladen: {exc}")
+        return
+
+    st.caption(f"Bestand: `{path}` | basisbranch: `{branch}` | versie: `{file_sha[:10]}`")
+    edited = st.text_area("SQL-script", value=content, height=460, key=f"sql_content_{source_object_id}_{path}")
+    description = st.text_input(
+        "Beschrijving van de wijziging",
+        key=f"sql_description_{source_object_id}_{path}",
+        placeholder="Waarom moet deze SQL worden aangepast?",
+    )
+    has_token = bool(os.environ.get("GITHUB_TOKEN"))
+    if not has_token:
+        st.info("SQL is leesbaar, maar GITHUB_TOKEN ontbreekt. Configureer die als Databricks App-secret om een Pull Request te maken.")
+    if st.button(
+        "Maak Pull Request voor SQL-wijziging",
+        type="primary",
+        key=f"sql_submit_{source_object_id}_{path}",
+        disabled=not has_token,
+    ):
+        if not edited.strip() or not description.strip():
+            st.error("SQL en een beschrijving van de wijziging zijn verplicht.")
+            return
+        try:
+            pull_url = create_script_pull_request(path, edited, source_object_id, description)
+            st.success(f"Pull Request aangemaakt: {pull_url}")
+        except Exception as exc:
+            st.error(f"Pull Request kon niet worden aangemaakt: {exc}")
+
+
 st.sidebar.markdown("## Control Room")
 env = st.sidebar.selectbox("Omgeving", ["dev", "tst", "prd"], index=0)
 if st.sidebar.button("Ververs data"):
@@ -1075,6 +1188,8 @@ with etl_tab:
             st.divider()
             st.subheader("Gerelateerde ETL-componenten")
             metadata_component_editor(env, selected_source, related_components)
+            st.divider()
+            sql_script_editor(str(selected_source["source_object_id"]))
         except Exception as exc:
             st.error(f"Gerelateerde ETL-componenten konden niet worden geladen: {exc}")
 

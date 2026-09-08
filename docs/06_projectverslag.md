@@ -230,7 +230,7 @@ De uitvoering toont bovendien dat het ontwerp onder realistische fouten beheersb
 
 Voor technische verdieping wordt verwezen naar [architectuur](01_architecture.md), [workflowontwerp](05_workflow_design.md) en de [besluitenlog](00_besluitenlog.md).
 
-## 11. Architectuurreview 7 september 2026
+## 11. Architectuurreview 6 september 2026
 
 Op verzoek is een kritische review uitgevoerd vanuit het perspectief Principal Data Architect (Databricks, Delta Lake, Data Vault 2.0, Fabric). Kernbevindingen:
 

@@ -722,14 +722,16 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
             return ""
         return str(value)
 
+    widget_prefix = f"existing_etl_{selected_id}"
     with st.form(f"edit_etl_{selected_id}"):
         left, right = st.columns(2)
         with left:
-            object_name = st.text_input("Objectnaam", value=str(selected.get("object_name") or ""))
-            file_pattern = st.text_input("Bestandspatroon", value=str(selected.get("file_pattern") or ""))
+            object_name = st.text_input("Objectnaam", value=str(selected.get("object_name") or ""), key=f"{widget_prefix}_object_name")
+            file_pattern = st.text_input("Bestandspatroon", value=str(selected.get("file_pattern") or ""), key=f"{widget_prefix}_file_pattern")
             file_format = st.selectbox(
                 "Bestandsformaat", ["parquet", "json", "csv"],
                 index=["parquet", "json", "csv"].index(str(selected.get("file_format") or "parquet").lower()),
+                key=f"{widget_prefix}_file_format",
             )
             load_strategy = st.selectbox(
                 "Laadstrategie",
@@ -737,13 +739,15 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
                 index=["INCREMENTAL_APPEND", "INCREMENTAL_MERGE", "SNAPSHOT_SCD2", "PARTIAL_SNAPSHOT", "FULL_OVERWRITE"].index(
                     str(selected.get("load_strategy") or "INCREMENTAL_APPEND")
                 ),
+                key=f"{widget_prefix}_load_strategy",
             )
-            business_keys = st.text_input("Business keys", value=list_value("business_key_columns"))
-            change_columns = st.text_input("Kolommen voor wijzigingsdetectie", value=list_value("change_tracking_columns"))
+            business_keys = st.text_input("Business keys", value=list_value("business_key_columns"), key=f"{widget_prefix}_business_keys")
+            change_columns = st.text_input("Kolommen voor wijzigingsdetectie", value=list_value("change_tracking_columns"), key=f"{widget_prefix}_change_columns")
         with right:
             delete_semantics = st.selectbox(
                 "Verwijdersemantiek", ["NONE", "SOFT_DELETE_FLAG", "HARD_DELETE"],
                 index=["NONE", "SOFT_DELETE_FLAG", "HARD_DELETE"].index(str(selected.get("delete_semantics") or "NONE")),
+                key=f"{widget_prefix}_delete_semantics",
             )
             schema_drift_policy = st.selectbox(
                 "Schema-driftbeleid",
@@ -756,15 +760,17 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
                     in ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS", "RESCUE"]
                     else 0
                 ),
+                key=f"{widget_prefix}_schema_drift_policy",
             )
-            owner_team = st.text_input("Verantwoordelijk team", value=str(selected.get("owner_team") or ""))
+            owner_team = st.text_input("Verantwoordelijk team", value=str(selected.get("owner_team") or ""), key=f"{widget_prefix}_owner_team")
             criticality = st.selectbox(
                 "Kritikaliteit", ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
                 index=["LOW", "MEDIUM", "HIGH", "CRITICAL"].index(str(selected.get("criticality") or "MEDIUM")),
+                key=f"{widget_prefix}_criticality",
             )
-            freshness_sla = st.number_input("Freshness-SLA (uur)", min_value=1, value=int(selected.get("freshness_sla_hours") or 24))
-            load_order = st.number_input("Laadvolgorde", min_value=1, value=int(selected.get("load_order") or 100))
-            is_active = st.checkbox("ETL-oplossing actief", value=bool(selected.get("is_active", False)))
+            freshness_sla = st.number_input("Freshness-SLA (uur)", min_value=1, value=int(selected.get("freshness_sla_hours") or 24), key=f"{widget_prefix}_freshness_sla")
+            load_order = st.number_input("Laadvolgorde", min_value=1, value=int(selected.get("load_order") or 100), key=f"{widget_prefix}_load_order")
+            is_active = st.checkbox("ETL-oplossing actief", value=bool(selected.get("is_active", False)), key=f"{widget_prefix}_is_active")
         submitted = st.form_submit_button("Bewaar wijziging als draft", type="primary")
 
     if submitted:

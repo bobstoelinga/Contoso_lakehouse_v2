@@ -699,19 +699,25 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
         st.info("Geen ETL-oplossingen gevonden in de metadata.")
         return None
 
-    display = solutions[["source_object_id", "source_system_id", "object_name", "load_strategy", "is_active"]].copy()
-    display = display.rename(
-        columns={
-            "source_object_id": "Bronobject",
-            "source_system_id": "Bronsysteem",
-            "object_name": "Object",
-            "load_strategy": "Laadstrategie",
-            "is_active": "Actief",
-        }
-    )
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    header = st.columns([2.2, 1.4, 1.5, 1.8, 0.8])
+    for column, label in zip(header, ["Bronobject", "Bronsysteem", "Object", "Laadstrategie", ""]):
+        column.markdown(f"**{label}**")
+    for _, row in solutions.iterrows():
+        columns = st.columns([2.2, 1.4, 1.5, 1.8, 0.8])
+        columns[0].write(str(row.get("source_object_id", "")))
+        columns[1].write(str(row.get("source_system_id", "")))
+        columns[2].write(str(row.get("object_name", "")))
+        columns[3].write(str(row.get("load_strategy", "")))
+        with columns[4]:
+            if st.button("Details", key=f"details_{row['source_object_id']}"):
+                st.session_state["existing_etl_solution"] = str(row["source_object_id"])
+                st.rerun()
 
-    selected_id = st.selectbox("ETL-oplossing", solutions["source_object_id"].tolist(), key="existing_etl_solution")
+    selected_id = st.selectbox(
+        "Geselecteerd detailrecord",
+        solutions["source_object_id"].tolist(),
+        key="existing_etl_solution",
+    )
     selected = solutions[solutions["source_object_id"] == selected_id].iloc[0].to_dict()
 
     def list_value(field: str) -> str:

@@ -52,7 +52,8 @@ flowchart LR
 │   ├── 02_metadata_model.md
 │   ├── 03_unity_catalog.md
 │   ├── 04_data_vault.md
-│   └── 05_workflow_design.md
+│   ├── 05_workflow_design.md
+│   └── 08_azure_inrichting.md  # Azure-resources, identities en inrichting
 ├── sql/
 │   ├── 00_unity_catalog/       # Catalogs, schemas, volumes, grants
 │   ├── 01_metadata/            # Metadata model + audit model

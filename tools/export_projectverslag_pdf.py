@@ -134,6 +134,120 @@ def workflow_diagram() -> Drawing:
     return drawing
 
 
+def metadata_diagram() -> Drawing:
+    drawing = Drawing(480, 132)
+    drawing.add(String(240, 119, "Metadata als besturingslaag", textAnchor="middle",
+                       fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 182, 78, 116, "Metadata catalogus", "#E8E1F0")
+    targets = [
+        (18, 27, "Bronnen + objecten", "#DCEBF2"),
+        (139, 27, "Mappings + DQ", "#E5F1E2"),
+        (260, 27, "Vault + Gold", "#F5EACB"),
+        (381, 27, "Audit + policies", "#EAF0F3"),
+    ]
+    for x, y, label, fill in targets:
+        box(drawing, x, y, 100, label, fill)
+        arrow(drawing, 240, 78, x + 50, 58)
+    return drawing
+
+
+def delivery_gate_diagram() -> Drawing:
+    drawing = Drawing(480, 128)
+    drawing.add(String(240, 116, "Delivery-gate: geen gedeeltelijke verwerking",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 12, 65, 92, "Datumfolder", "#DCEBF2")
+    box(drawing, 124, 65, 92, "CLOSED manifest", "#DCEBF2")
+    box(drawing, 236, 65, 92, "Readiness view", "#F5EACB")
+    box(drawing, 348, 84, 112, "Gate open", "#E5F1E2")
+    box(drawing, 348, 28, 112, "SKIPPED / wachten", "#F7E0DC")
+    arrow(drawing, 104, 80, 124, 80)
+    arrow(drawing, 216, 80, 236, 80)
+    arrow(drawing, 328, 80, 348, 99)
+    arrow(drawing, 328, 80, 348, 43)
+    drawing.add(String(341, 108, "complete", fontName="Helvetica", fontSize=7,
+                       fillColor=colors.HexColor("#376C42")))
+    drawing.add(String(338, 19, "onvolledig", fontName="Helvetica", fontSize=7,
+                       fillColor=colors.HexColor("#A34539")))
+    return drawing
+
+
+def vault_diagram() -> Drawing:
+    drawing = Drawing(480, 130)
+    drawing.add(String(240, 118, "Data Vault 2.0: historie zonder bronverlies",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 18, 70, 90, "Hubs / keys", "#E8E1F0")
+    box(drawing, 128, 70, 90, "Links / relaties", "#E8E1F0")
+    box(drawing, 238, 70, 90, "Satellites / historie", "#E8E1F0")
+    box(drawing, 348, 70, 114, "Business Vault", "#F5EACB")
+    arrow(drawing, 108, 85, 128, 85)
+    arrow(drawing, 218, 85, 238, 85)
+    arrow(drawing, 328, 85, 348, 85)
+    box(drawing, 145, 20, 190, "SHA-256 + hashdiff + record source", "#EAF0F3")
+    arrow(drawing, 193, 51, 193, 70)
+    arrow(drawing, 287, 51, 287, 70)
+    return drawing
+
+
+def gold_publication_diagram() -> Drawing:
+    drawing = Drawing(480, 130)
+    drawing.add(String(240, 118, "Gold Actueel: atomische publicatie per groep",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 18, 69, 102, "Build _v2", "#DCEBF2")
+    box(drawing, 138, 69, 102, "Validate group", "#E5F1E2")
+    box(drawing, 258, 69, 102, "Releasepointer", "#F5EACB")
+    box(drawing, 378, 69, 84, "Public views", "#F5EACB")
+    arrow(drawing, 120, 84, 138, 84)
+    arrow(drawing, 240, 84, 258, 84)
+    arrow(drawing, 360, 84, 378, 84)
+    box(drawing, 120, 18, 110, "Fout -> vorige versie", "#F7E0DC")
+    arrow(drawing, 189, 69, 175, 49)
+    return drawing
+
+
+def source_routes_diagram() -> Drawing:
+    drawing = Drawing(480, 132)
+    drawing.add(String(240, 120, "Bronroutes naar dezelfde generieke keten",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 18, 76, 100, "Sales files", "#DCEBF2")
+    box(drawing, 18, 28, 100, "API / JDBC pulls", "#DCEBF2")
+    box(drawing, 190, 52, 105, "Landing Volume", "#DCEBF2")
+    box(drawing, 365, 52, 100, "Bronze -> Gold", "#F5EACB")
+    arrow(drawing, 118, 91, 190, 75)
+    arrow(drawing, 118, 43, 190, 65)
+    arrow(drawing, 295, 68, 365, 68)
+    return drawing
+
+
+def validation_diagram() -> Drawing:
+    drawing = Drawing(480, 128)
+    drawing.add(String(240, 116, "Validatieketen: van Git tot runtime",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 18, 65, 102, "Release-check", "#DCEBF2")
+    box(drawing, 138, 65, 102, "Pytest 131", "#E5F1E2")
+    box(drawing, 258, 65, 102, "Bundle + setup", "#DCEBF2")
+    box(drawing, 378, 65, 84, "Dev runtime", "#F5EACB")
+    arrow(drawing, 120, 80, 138, 80)
+    arrow(drawing, 240, 80, 258, 80)
+    arrow(drawing, 360, 80, 378, 80)
+    box(drawing, 154, 18, 172, "Bewijs: logs, audit, counts", "#EAF0F3")
+    arrow(drawing, 309, 65, 278, 49)
+    return drawing
+
+
+def diagrams_for_heading(heading_text: str) -> list[Drawing]:
+    if heading_text.startswith("5. Architectuur"):
+        return [metadata_diagram(), source_routes_diagram(), vault_diagram(), delivery_gate_diagram(), gold_publication_diagram()]
+    if heading_text.startswith("7. Validatie"):
+        return [validation_diagram()]
+    return []
+
+
 def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
@@ -241,6 +355,10 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
                 story.append(Spacer(1, 7))
                 story.append(workflow_diagram())
                 story.append(Spacer(1, 8))
+            for diagram in diagrams_for_heading(heading.group(2)):
+                story.append(Spacer(1, 5))
+                story.append(diagram)
+                story.append(Spacer(1, 7))
             index += 1
             continue
         if line.startswith("> "):

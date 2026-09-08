@@ -140,6 +140,13 @@ QUERIES = {
         WHERE source_system_id = '{source_system_id}'
         ORDER BY load_order
     """,
+    "etl_sql_scripts": """
+        SELECT script_id, target_layer, script_path, script_body, script_version, script_checksum
+        FROM {meta}.meta_sql_script
+                WHERE script_status = 'ACTIVE' AND is_active
+                    AND (source_object_id = '{source_object_id}' OR source_object_id IS NULL)
+                ORDER BY source_object_id DESC, target_layer, script_path
+    """,
 }
 
 SQL_SCRIPT_FILES = {
@@ -1031,17 +1038,21 @@ def metadata_component_editor(
         st.success(f"{action.capitalize()} opgeslagen als draft: {draft_id}. Review en merge blijven verplicht.")
 
 
-def sql_script_editor(source_object_id: str, object_name: str) -> None:
-    """Toont repository-SQL en maakt een gecontroleerde Pull Request mogelijk."""
+def sql_script_editor(env: str, source_object_id: str, object_name: str) -> None:
+    """Toont geregistreerde SQL en maakt een gecontroleerde Pull Request mogelijk."""
     st.subheader("SQL-logica van bron naar output")
     st.caption("Filter op bron of tabel, wijzig alleen het gevonden SQL-blok en maak daarna een Pull Request.")
     layer = st.selectbox("SQL-laag", list(SQL_SCRIPT_FILES), key=f"sql_layer_{source_object_id}")
     path = SQL_SCRIPT_FILES[layer]
     branch = os.environ.get("GITHUB_BASE_BRANCH", "main")
     try:
-        content, file_sha = github_script(path, branch)
+        scripts = query("etl_sql_scripts", env, source_object_id=source_object_id)
+        script_row = scripts[scripts["script_path"] == path].iloc[0]
+        content = str(script_row["script_body"])
+        file_sha = str(script_row["script_checksum"])
+        full_content, _ = github_script(path, branch)
     except Exception as exc:
-        st.error(f"SQL-script kon niet uit GitHub worden geladen: {exc}")
+        st.error(f"SQL-script kon niet uit de scriptregistry worden geladen: {exc}")
         return
 
     st.caption(f"Bestand: `{path}` | basisbranch: `{branch}` | versie: `{file_sha[:10]}`")
@@ -1084,7 +1095,7 @@ def sql_script_editor(source_object_id: str, object_name: str) -> None:
             st.error("SQL en een beschrijving van de wijziging zijn verplicht.")
             return
         try:
-            updated_content = content.replace(original_section, edited, 1)
+            updated_content = full_content.replace(original_section, edited, 1)
             pull_url = create_script_pull_request(path, updated_content, source_object_id, description)
             st.success(f"Pull Request aangemaakt: {pull_url}")
         except Exception as exc:
@@ -1226,6 +1237,7 @@ with etl_tab:
             metadata_component_editor(env, selected_source, related_components)
             st.divider()
             sql_script_editor(
+                env,
                 str(selected_source["source_object_id"]),
                 str(selected_source.get("object_name") or selected_source["source_object_id"]),
             )

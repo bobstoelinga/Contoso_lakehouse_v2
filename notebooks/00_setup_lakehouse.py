@@ -28,6 +28,9 @@ repo_root = dbutils.widgets.get("repo_root")
 # COMMAND ----------
 
 import sys
+import hashlib
+import json
+import re
 from pathlib import Path
 
 sys.path.insert(0, f"{repo_root}/src")
@@ -54,7 +57,6 @@ SCRIPTS = [
     "sql/01_metadata/10_metadata_model.sql",
     "sql/01_metadata/11_audit_model.sql",
     "sql/01_metadata/12_metadata_migrations.sql",
-    "sql/02_bronze/20_bronze_tables.sql",
     "sql/03_quality_reject/30_quality_tables.sql",
     "sql/03_quality_reject/31_reject_tables.sql",
     "sql/04_data_vault/40_raw_vault.sql",
@@ -256,6 +258,139 @@ apply_migrations()
 
 counts = load_seed(spark, settings, f"{repo_root}/metadata/seed")
 display(spark.createDataFrame(list(counts.items()), "table string, records int"))
+
+# COMMAND ----------
+
+# MAGIC %md ## 4. SQL-scriptregistry vullen
+# MAGIC De repository blijft de versiebron; de metadata-tabel bevat de exacte
+# MAGIC goedgekeurde inhoud die door tooling en runtime kan worden geraadpleegd.
+
+# COMMAND ----------
+
+SCRIPT_REGISTRY = {
+        "BRONZE": "sql/02_bronze/20_bronze_tables.sql",
+        "QUALITY": "sql/03_quality_reject/30_quality_tables.sql",
+        "REJECT": "sql/03_quality_reject/31_reject_tables.sql",
+        "RAW_VAULT": "sql/04_data_vault/40_raw_vault.sql",
+        "BUSINESS_VAULT": "sql/04_data_vault/41_business_vault.sql",
+        "GOLD_HISTORICAL": "sql/05_gold/50_gold_historical.sql",
+        "GOLD_CURRENT": "sql/05_gold/51_gold_current.sql",
+}
+
+
+def load_sql_script_registry() -> None:
+    from pyspark.sql.types import StringType, StructField, StructType
+
+    rows = []
+    bronze_objects = {
+        row.bronze_table: row.source_object_id
+        for row in spark.sql(
+            f"SELECT source_object_id, bronze_table FROM {settings.meta_catalog}.metadata.meta_source_object"
+        ).collect()
+    }
+    for target_layer, relative_path in SCRIPT_REGISTRY.items():
+        body = Path(f"{repo_root}/{relative_path}").read_text(encoding="utf-8")
+        checksum = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        base_record = {
+            "script_id": f"{target_layer}:{relative_path}",
+            "source_object_id": None,
+            "target_layer": target_layer,
+            "script_path": relative_path,
+            "script_body": body,
+            "script_version": checksum[:12],
+            "script_checksum": checksum,
+            "script_status": "ACTIVE",
+            "change_reference": "GIT",
+            "approved_by": "GIT_DEPLOYMENT",
+        }
+        rows.append(base_record)
+        if target_layer == "BRONZE":
+            for statement in split_sql_statements(body):
+                match = re.search(r"CREATE TABLE IF NOT EXISTS\s+br_([A-Za-z0-9_]+)", statement, re.IGNORECASE)
+                if not match:
+                    continue
+                source_object_id = bronze_objects.get(f"br_{match.group(1)}")
+                if not source_object_id:
+                    continue
+                statement_checksum = hashlib.sha256(statement.encode("utf-8")).hexdigest()
+                rows.append({
+                    **base_record,
+                    "script_id": f"{target_layer}:{source_object_id}",
+                    "source_object_id": source_object_id,
+                    "script_body": statement,
+                    "script_version": statement_checksum[:12],
+                    "script_checksum": statement_checksum,
+                })
+    schema = StructType([
+        StructField("script_id", StringType(), False),
+        StructField("source_object_id", StringType(), True),
+        StructField("target_layer", StringType(), False),
+        StructField("script_path", StringType(), False),
+        StructField("script_body", StringType(), False),
+        StructField("script_version", StringType(), False),
+        StructField("script_checksum", StringType(), False),
+        StructField("script_status", StringType(), False),
+        StructField("change_reference", StringType(), True),
+        StructField("approved_by", StringType(), True),
+    ])
+    registry = spark.createDataFrame(rows, schema)
+    registry.createOrReplaceTempView("_sql_script_registry")
+    target = f"{settings.meta_catalog}.metadata.meta_sql_script"
+    spark.sql(
+        f"""
+        MERGE INTO {target} t
+        USING _sql_script_registry s ON t.script_id = s.script_id
+        WHEN MATCHED THEN UPDATE SET
+          t.script_body = s.script_body,
+          t.script_version = s.script_version,
+          t.script_checksum = s.script_checksum,
+          t.script_status = s.script_status,
+          t.change_reference = s.change_reference,
+          t.approved_by = s.approved_by,
+          t.is_active = true
+        WHEN NOT MATCHED THEN INSERT (
+          script_id, source_object_id, target_layer, script_path, script_body,
+          script_version, script_checksum, script_status, change_reference,
+          approved_by, is_active
+        ) VALUES (
+          s.script_id, s.source_object_id, s.target_layer, s.script_path, s.script_body,
+          s.script_version, s.script_checksum, s.script_status, s.change_reference,
+          s.approved_by, true
+        )
+        """
+    )
+
+
+load_sql_script_registry()
+
+
+def run_registered_script(script_id: str) -> None:
+    target = f"{settings.meta_catalog}.metadata.meta_sql_script"
+    row = spark.sql(
+        f"""
+        SELECT script_body, script_checksum
+        FROM {target}
+        WHERE script_id = '{script_id}'
+          AND script_status = 'ACTIVE'
+          AND is_active
+        """
+    ).first()
+    if not row:
+        raise ValueError(f"Geen actieve SQL-scriptversie gevonden voor {script_id}.")
+    actual_checksum = hashlib.sha256(row.script_body.encode("utf-8")).hexdigest()
+    if actual_checksum != row.script_checksum:
+        raise ValueError(f"Checksumcontrole mislukt voor {script_id}.")
+    for statement_number, statement in enumerate(split_sql_statements(row.script_body), start=1):
+        try:
+            spark.sql(statement)
+        except Exception as exc:
+            preview = " ".join(statement.split())[:500]
+            raise RuntimeError(
+                f"Geregistreerde SQL faalde in {script_id}, statement {statement_number}: {preview}"
+            ) from exc
+
+
+run_registered_script("BRONZE:sql/02_bronze/20_bronze_tables.sql")
 
 # COMMAND ----------
 

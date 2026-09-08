@@ -134,6 +134,30 @@ CREATE TABLE IF NOT EXISTS meta_retry_policy (
   is_active           BOOLEAN NOT NULL DEFAULT true,
   CONSTRAINT pk_retry_policy PRIMARY KEY (retry_policy_id) RELY
 )
+
+-- -----------------------------------------------------------------------------
+-- 2b. Versiebeheer van uitvoerbare SQL per ETL-component
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meta_sql_script (
+  script_id          STRING    NOT NULL,
+  source_object_id   STRING,
+  target_layer       STRING    NOT NULL COMMENT 'BRONZE | QUALITY | VAULT | GOLD',
+  script_path        STRING    NOT NULL COMMENT 'Pad in de Git-repository',
+  script_body        STRING    NOT NULL COMMENT 'Goedgekeurde uitvoerbare SQL',
+  script_version     STRING    NOT NULL,
+  script_checksum    STRING    NOT NULL,
+  script_status      STRING    NOT NULL COMMENT 'DRAFT | APPROVED | ACTIVE | RETIRED',
+  change_reference   STRING,
+  approved_by        STRING,
+  approved_at        TIMESTAMP,
+  is_active          BOOLEAN   NOT NULL DEFAULT true,
+  created_at         TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+  created_by         STRING    NOT NULL DEFAULT current_user(),
+  CONSTRAINT pk_meta_sql_script PRIMARY KEY (script_id) RELY
+)
+USING DELTA
+COMMENT 'Gecontroleerde SQL-implementaties per ETL-component; alleen ACTIVE wordt door runtime gebruikt.'
+TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');
 USING DELTA
 COMMENT 'Referentietabel voor retry- en prioriteitsbeleid; voorkomt duplicatie in meta_dependency.'
 TBLPROPERTIES ('delta.feature.allowColumnDefaults' = 'supported');

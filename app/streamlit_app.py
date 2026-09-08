@@ -105,6 +105,36 @@ QUERIES = {
           ON ss.source_system_id = so.source_system_id
         ORDER BY so.source_system_id, so.source_object_id
     """,
+    "etl_connectors": """
+        SELECT * FROM {meta}.meta_source_connector
+        WHERE source_object_id = '{source_object_id}'
+    """,
+    "etl_mappings": """
+        SELECT * FROM {meta}.meta_mapping
+        WHERE source_object_id = '{source_object_id}'
+        ORDER BY ordinal_position
+    """,
+    "etl_quality_rules": """
+        SELECT * FROM {meta}.meta_quality_rule
+        WHERE source_object_id = '{source_object_id}'
+        ORDER BY execution_order
+    """,
+    "etl_dv_mappings": """
+        SELECT m.* FROM {meta}.meta_dv_mapping m
+        WHERE m.source_object_id = '{source_object_id}'
+        ORDER BY m.ordinal_position
+    """,
+    "etl_dv_entities": """
+        SELECT DISTINCT e.* FROM {meta}.meta_dv_entity e
+        JOIN {meta}.meta_dv_mapping m ON m.dv_entity_id = e.dv_entity_id
+        WHERE m.source_object_id = '{source_object_id}'
+        ORDER BY e.load_order
+    """,
+    "etl_gold_entities": """
+        SELECT * FROM {meta}.meta_gold_entity
+        WHERE source_system_id = '{source_system_id}'
+        ORDER BY load_order
+    """,
 }
 
 
@@ -126,9 +156,13 @@ def sql_connection():
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def query(name: str, env: str) -> pd.DataFrame:
+def query(name: str, env: str, **params: str) -> pd.DataFrame:
     catalog = f"contoso_meta_{env}"
-    statement = QUERIES[name].format(audit=f"{catalog}.audit", meta=f"{catalog}.metadata")
+    statement = QUERIES[name].format(
+        audit=f"{catalog}.audit",
+        meta=f"{catalog}.metadata",
+        **params,
+    )
     with sql_connection().cursor() as cursor:
         cursor.execute(statement)
         rows = cursor.fetchall()
@@ -663,7 +697,7 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
     )
     if solutions.empty:
         st.info("Geen ETL-oplossingen gevonden in de metadata.")
-        return
+        return None
 
     display = solutions[["source_object_id", "source_system_id", "object_name", "load_strategy", "is_active"]].copy()
     display = display.rename(
@@ -759,6 +793,129 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
             st.error(f"ETL-definitie kon niet worden opgeslagen: {exc}")
         except Exception as exc:
             st.error(f"ETL-draft kon niet worden opgeslagen: {exc}")
+    return selected
+
+
+def metadata_component_editor(
+    env: str,
+    source: dict,
+    components: dict[str, pd.DataFrame],
+) -> None:
+    """Bewerk gerelateerde metadata via formulieren; nooit rechtstreeks in productie."""
+    labels = {
+        "etl_connectors": ("Connector", "source_object_id"),
+        "etl_mappings": ("Kolommapping", "mapping_id"),
+        "etl_quality_rules": ("Quality-regel", "rule_id"),
+        "etl_dv_mappings": ("Data Vault-mapping", "dv_mapping_id"),
+        "etl_dv_entities": ("Data Vault-entiteit", "dv_entity_id"),
+        "etl_gold_entities": ("Gold-entiteit", "gold_entity_id"),
+    }
+    available = [name for name, (_, key) in labels.items() if not components[name].empty]
+    if not available:
+        st.info("Voor deze ETL-oplossing zijn geen gerelateerde componenten gevonden.")
+        return
+
+    component_name = st.selectbox(
+        "Onderdeel beheren",
+        available,
+        format_func=lambda value: labels[value][0],
+        key=f"component_type_{source['source_object_id']}",
+    )
+    frame = components[component_name]
+    key_column = labels[component_name][1]
+    options = frame[key_column].astype(str).tolist()
+    selected_key = st.selectbox(
+        labels[component_name][0], options,
+        key=f"component_key_{component_name}_{source['source_object_id']}",
+    )
+    record = frame[frame[key_column].astype(str) == selected_key].iloc[0].to_dict()
+
+    def text(field: str) -> str:
+        value = record.get(field, "")
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        return str(value)
+
+    def list_text(field: str) -> str:
+        value = record.get(field, [])
+        return ", ".join(str(item) for item in value) if isinstance(value, (list, tuple)) else text(field)
+
+    def integer(field: str, default: int = 100) -> int:
+        try:
+            return int(record.get(field) or default)
+        except (TypeError, ValueError):
+            return default
+
+    with st.form(f"component_form_{component_name}_{selected_key}"):
+        edited = dict(record)
+        if component_name == "etl_connectors":
+            edited["connector_type"] = st.selectbox("Connectortype", ["FILE_DROP", "HTTP_JSON", "HTTP_CSV", "JDBC", "LAKEFLOW_CONNECT"], index=(["FILE_DROP", "HTTP_JSON", "HTTP_CSV", "JDBC", "LAKEFLOW_CONNECT"].index(text("connector_type")) if text("connector_type") in ["FILE_DROP", "HTTP_JSON", "HTTP_CSV", "JDBC", "LAKEFLOW_CONNECT"] else 0))
+            edited["endpoint_url"] = st.text_input("Endpoint of landingpad", value=text("endpoint_url"))
+            edited["response_format"] = st.selectbox("Responseformaat", ["JSON", "CSV", "PARQUET"], index=(["JSON", "CSV", "PARQUET"].index(text("response_format").upper()) if text("response_format").upper() in ["JSON", "CSV", "PARQUET"] else 0))
+            edited["records_key"] = st.text_input("Records-sleutel", value=text("records_key"))
+            edited["next_link_key"] = st.text_input("Volgende-pagina-sleutel", value=text("next_link_key"))
+        elif component_name == "etl_mappings":
+            edited["target_layer"] = st.selectbox("Doellaag", ["BRONZE", "QUALITY", "GOLD_HIST", "GOLD_CURR"], index=(["BRONZE", "QUALITY", "GOLD_HIST", "GOLD_CURR"].index(text("target_layer")) if text("target_layer") in ["BRONZE", "QUALITY", "GOLD_HIST", "GOLD_CURR"] else 0))
+            edited["target_entity"] = st.text_input("Doelentiteit", value=text("target_entity"))
+            edited["source_column"] = st.text_input("Bronkolom", value=text("source_column"))
+            edited["source_expression"] = st.text_input("Bronexpressie", value=text("source_expression"))
+            edited["target_column"] = st.text_input("Doelkolom", value=text("target_column"))
+            edited["target_data_type"] = st.text_input("Datatype", value=text("target_data_type"))
+            edited["is_business_key"] = st.checkbox("Business key", value=bool(record.get("is_business_key", False)))
+            edited["is_nullable"] = st.checkbox("Nullable", value=bool(record.get("is_nullable", True)))
+            edited["default_value"] = st.text_input("Standaardwaarde", value=text("default_value"))
+            edited["ordinal_position"] = st.number_input("Volgorde", min_value=1, value=integer("ordinal_position"))
+        elif component_name == "etl_quality_rules":
+            edited["rule_name"] = st.text_input("Regelnaam", value=text("rule_name"))
+            edited["rule_type"] = st.selectbox("Regeltype", ["NOT_NULL", "UNIQUE", "RANGE", "REGEX", "ALLOWED_VALUES", "REFERENTIAL", "CUSTOM_SQL", "DATA_TYPE"], index=(["NOT_NULL", "UNIQUE", "RANGE", "REGEX", "ALLOWED_VALUES", "REFERENTIAL", "CUSTOM_SQL", "DATA_TYPE"].index(text("rule_type")) if text("rule_type") in ["NOT_NULL", "UNIQUE", "RANGE", "REGEX", "ALLOWED_VALUES", "REFERENTIAL", "CUSTOM_SQL", "DATA_TYPE"] else 0))
+            edited["target_columns"] = [item.strip() for item in st.text_input("Doelkolommen", value=list_text("target_columns")).split(",") if item.strip()]
+            edited["rule_expression"] = st.text_input("Regel-expressie", value=text("rule_expression"))
+            edited["severity"] = st.selectbox("Ernst", ["ERROR", "WARNING"], index=0 if text("severity") != "WARNING" else 1)
+            edited["reject_reason_code"] = st.text_input("Reject-code", value=text("reject_reason_code"))
+            edited["reject_reason_text"] = st.text_input("Reject-omschrijving", value=text("reject_reason_text"))
+            edited["execution_order"] = st.number_input("Uitvoervolgorde", min_value=1, value=integer("execution_order"))
+            edited["is_blocking"] = st.checkbox("Blokkerend", value=bool(record.get("is_blocking", True)))
+        elif component_name == "etl_dv_mappings":
+            edited["source_expression"] = st.text_input("Bronexpressie", value=text("source_expression"))
+            edited["target_column"] = st.text_input("Doelkolom", value=text("target_column"))
+            edited["target_data_type"] = st.text_input("Datatype", value=text("target_data_type"))
+            edited["column_role"] = st.selectbox("Kolomrol", ["HASH_KEY", "BUSINESS_KEY", "HASHDIFF", "DESCRIPTIVE", "DEGENERATE", "DRIVING_KEY", "LOAD_DATE", "RECORD_SOURCE"], index=0)
+            edited["is_in_hashdiff"] = st.checkbox("Opnemen in hashdiff", value=bool(record.get("is_in_hashdiff", False)))
+            edited["ordinal_position"] = st.number_input("Volgorde", min_value=1, value=integer("ordinal_position"))
+        elif component_name == "etl_dv_entities":
+            edited["target_table"] = st.text_input("Doeltabel", value=text("target_table"))
+            edited["hash_key_column"] = st.text_input("Hash-keykolom", value=text("hash_key_column"))
+            edited["business_key_columns"] = [item.strip() for item in st.text_input("Business keys", value=list_text("business_key_columns")).split(",") if item.strip()]
+            edited["parent_entity_ids"] = [item.strip() for item in st.text_input("Bovenliggende entiteiten", value=list_text("parent_entity_ids")).split(",") if item.strip()]
+            edited["load_order"] = st.number_input("Laadvolgorde", min_value=1, value=integer("load_order"))
+        else:
+            edited["target_table"] = st.text_input("Doeltabel", value=text("target_table"))
+            edited["business_key_columns"] = [item.strip() for item in st.text_input("Business keys", value=list_text("business_key_columns")).split(",") if item.strip()]
+            edited["select_sql"] = st.text_area("Gold-selectie", value=text("select_sql"), height=120)
+            edited["scd_type"] = st.selectbox("SCD-type", ["NONE", "SCD1", "SCD2", "SNAPSHOT"], index=(["NONE", "SCD1", "SCD2", "SNAPSHOT"].index(text("scd_type")) if text("scd_type") in ["NONE", "SCD1", "SCD2", "SNAPSHOT"] else 0))
+            edited["publish_mode"] = st.selectbox("Publicatiemodus", ["ATOMIC_SWAP", "MERGE", "OVERWRITE"], index=(["ATOMIC_SWAP", "MERGE", "OVERWRITE"].index(text("publish_mode")) if text("publish_mode") in ["ATOMIC_SWAP", "MERGE", "OVERWRITE"] else 0))
+            edited["publication_group_id"] = st.text_input("Publicatiegroep", value=text("publication_group_id"))
+            edited["load_order"] = st.number_input("Laadvolgorde", min_value=1, value=integer("load_order"))
+        save = st.form_submit_button("Bewaar onderdeel als draft", type="primary")
+
+    deactivate = st.button("Deactiveer onderdeel", key=f"deactivate_{component_name}_{selected_key}")
+    if save or deactivate:
+        if deactivate:
+            edited["is_active"] = False
+        draft_id = save_onboarding_draft(
+            env,
+            str(source["source_system_id"]),
+            str(source["source_object_id"]),
+            "EXISTING_ETL_COMPONENT_CHANGE",
+            {"meta_source_connector.json" if component_name == "etl_connectors" else
+             "meta_mapping.json" if component_name == "etl_mappings" else
+             "meta_quality_rule.json" if component_name == "etl_quality_rules" else
+             "meta_dv_mapping.json" if component_name == "etl_dv_mappings" else
+             "meta_dv_entity.json" if component_name == "etl_dv_entities" else
+             "meta_gold_entity.json": [edited]},
+        )
+        action = "deactivatie" if deactivate else "wijziging"
+        st.success(f"{action.capitalize()} opgeslagen als draft: {draft_id}. Review en merge blijven verplicht.")
 
 
 st.sidebar.markdown("## Control Room")
@@ -878,6 +1035,24 @@ with flow_tab:
 
 with etl_tab:
     existing_etl_editor(env, etl_solutions)
+    selected_id = st.session_state.get("existing_etl_solution")
+    if selected_id:
+        selected_source = etl_solutions[etl_solutions["source_object_id"] == selected_id].iloc[0].to_dict()
+        try:
+            related_components = {
+                name: query(
+                    name,
+                    env,
+                    source_object_id=str(selected_source["source_object_id"]),
+                    source_system_id=str(selected_source["source_system_id"]),
+                )
+                for name in ("etl_connectors", "etl_mappings", "etl_quality_rules", "etl_dv_mappings", "etl_dv_entities", "etl_gold_entities")
+            }
+            st.divider()
+            st.subheader("Gerelateerde ETL-componenten")
+            metadata_component_editor(env, selected_source, related_components)
+        except Exception as exc:
+            st.error(f"Gerelateerde ETL-componenten konden niet worden geladen: {exc}")
 
 with action_tab:
     st.subheader("Gecontroleerde operatoracties")

@@ -158,3 +158,25 @@ Resource Manager worden toegevoegd:
 
 Deze punten zijn bewust als open controlepunten opgenomen; ze zijn niet uit de
 beschikbare lokale Azure-authenticatie afgeleid.
+
+## 8. SQL-scriptregistry
+
+SQL die onderdeel is van de ETL-keten wordt geregistreerd in
+`contoso_meta_<env>.metadata.meta_sql_script`. GitHub blijft de versiebron,
+maar de registry bevat de exacte uitvoerbare inhoud, versie, checksum,
+bronobjectkoppeling en status.
+
+Voor Bronze worden de `CREATE TABLE`-blokken per `source_object_id` geregistreerd.
+De setup-job leest de actieve Bronze-versie uit deze registry, controleert de
+checksum en voert daarna de SQL uit. Daardoor kan de Control Room in het
+detailscherm precies het relevante blok tonen en wijzigen, zonder alle andere
+bronnen in hetzelfde SQL-bestand te tonen.
+
+Een wijziging doorloopt altijd deze statussen:
+
+```text
+DRAFT -> APPROVED -> ACTIVE -> RETIRED
+```
+
+De app maakt de wijziging als Pull Request in GitHub. Pas na merge, bundle
+deployment en een succesvolle setup-/validatierun wordt de nieuwe versie actief.

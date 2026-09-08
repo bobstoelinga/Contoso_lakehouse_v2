@@ -747,9 +747,14 @@ def existing_etl_editor(env: str, solutions: pd.DataFrame) -> None:
             )
             schema_drift_policy = st.selectbox(
                 "Schema-driftbeleid",
-                ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS"],
-                index=["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS"].index(
-                    str(selected.get("schema_drift_policy") or "STRICT")
+                ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS", "RESCUE"],
+                index=(
+                    ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS", "RESCUE"].index(
+                        str(selected.get("schema_drift_policy") or "STRICT")
+                    )
+                    if str(selected.get("schema_drift_policy") or "STRICT")
+                    in ["STRICT", "ALLOW_NEW_COLUMNS_WITH_APPROVAL", "ALLOW_NEW_COLUMNS", "RESCUE"]
+                    else 0
                 ),
             )
             owner_team = st.text_input("Verantwoordelijk team", value=str(selected.get("owner_team") or ""))

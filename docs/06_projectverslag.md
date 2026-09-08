@@ -240,7 +240,7 @@ naar audit-tabellen, maar starten de bestaande Databricks-remediation- en
 maintenance-jobs. Reden, uitvoerder en approval/change-referentie zijn daarbij
 verplicht.
 
-**Open de applicatie:** [Streamlit](https://contoso-control-room-v2-7405619535862062.2.azure.databricks.com/)
+**Open de applicatie:** [Contoso Control Room](https://contoso-control-room-7405619535862062.2.azure.databricksapps.com/)
 
 De broncode staat in [app/streamlit_app.py](../app/streamlit_app.py) en de
 lokale/deploymentinstructies staan in [app/README.md](../app/README.md).
@@ -538,6 +538,16 @@ resultaten van vandaag zijn:
 - **SQL-details per ETL-laag**: Bronze-DDL en overige geregistreerde ETL-blokken
   kunnen gericht per bronobject worden bekeken. Daarmee wordt voorkomen dat een
   operator onnodig alle SQL of productiemetadata direct kan wijzigen.
+- **Normale app-start**: de dashboardinitialisatie probeert Databricks SQL
+  maximaal drie keer te bereiken, met oplopende wachttijden van standaard vijf
+  en tien seconden. Voor iedere retry wordt een nieuwe connector gemaakt,
+  zodat een tijdelijk startende of hervattende SQL Warehouse de app niet direct
+  laat falen. De waarden zijn configureerbaar met
+  `CONTOSO_SQL_STARTUP_ATTEMPTS` en `CONTOSO_SQL_STARTUP_RETRY_SECONDS`.
+- **Deployment**: de Control Room is als snapshot-deployment naar Azure
+  Databricks gepubliceerd. Deployment `01f1ab9fed4f155bbd31aa580a56b3cb`
+  eindigde succesvol; de app en haar compute stonden daarna op `RUNNING` en
+  `ACTIVE`.
 - **Bewijs en overdracht**: de Control Room is vastgelegd met schermafdrukken in
   Bijlage A. De Azure-resourceinventaris en de nog openstaande ARM-controles zijn
   opgenomen in [08_azure_inrichting.md](08_azure_inrichting.md).
@@ -572,6 +582,24 @@ Voor productieacceptatie moeten minimaal de open criteria AZ-01, AZ-03,
 AZ-05, AZ-06, AZ-07, AZ-10, AZ-11 en AZ-12 met Azure Portal- of
 `az resource list`-bewijs worden aangevuld. Tot die tijd is de Azure-inrichting
 een gevalideerde `dev`-basis, geen volledig productieontwerp.
+
+De Azure-inrichting omvat daarmee niet alleen de Databricks-workspace en
+Unity-Catalog-opslag, maar ook de runtimevoorwaarden voor de Control Room:
+Databricks App compute, SQL Warehouse-bereikbaarheid, secret-backed
+configuratie, gescheiden service principals en de benodigde `CAN_USE`-,
+catalogus- en schemarechten. De deployment is technisch geslaagd; de nog open
+staande netwerk-, Azure-RBAC-, observability-, kosten- en RPO/RTO-controles
+blijven productievoorwaarden.
+
+### Bijlage A: actuele appbeelden
+
+De PDF bevat zes schermafdrukken uit de Control Room: **Overzicht**,
+**Deliveries**, **Runs & Gold**, **Processen**, **Flow Setup** en
+**Operatoracties**. De beelden zijn opgenomen als overdrachtsbewijs van de
+interface en de beschikbare bedieningsvlakken. De gedeployde app kon tijdens
+het vastleggen wel renderen, maar gaf een Databricks SQL-bereikbaarheidsmelding;
+de inhoudelijke tabellen verschijnen pas wanneer het SQL Warehouse en de
+app-serviceprincipal beschikbaar zijn.
 
 De lokale release-gate bleef geldig met fingerprint
 `7996f205699885cdebc7b488a9f384b2e2fac9b5688873a04c2eed1e1b6ef61a`.

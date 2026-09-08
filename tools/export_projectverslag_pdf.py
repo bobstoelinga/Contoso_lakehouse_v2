@@ -21,6 +21,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.graphics.shapes import Drawing, Line, Rect, String
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,77 @@ def table_rows(lines: list[str]) -> list[list[str]]:
         rows.append([cell.strip() for cell in line.strip().strip("|").split("|")])
     width = max(len(row) for row in rows)
     return [row + [""] * (width - len(row)) for row in rows]
+
+
+def box(drawing: Drawing, x: float, y: float, width: float, label: str,
+        fill: str, text_color: str = "#17324D") -> None:
+    drawing.add(Rect(x, y, width, 31, rx=4, ry=4,
+                     fillColor=colors.HexColor(fill),
+                     strokeColor=colors.HexColor("#6C8798"), strokeWidth=0.8))
+    drawing.add(String(x + width / 2, y + 12, label, textAnchor="middle",
+                       fontName="Helvetica-Bold", fontSize=7.5,
+                       fillColor=colors.HexColor(text_color)))
+
+
+def arrow(drawing: Drawing, x1: float, y1: float, x2: float, y2: float) -> None:
+    drawing.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor("#4E6878"),
+                     strokeWidth=1.2, endArrow=True))
+
+
+def architecture_diagram() -> Drawing:
+    drawing = Drawing(480, 116)
+    labels = [
+        ("Landing", "#DCEBF2"), ("Bronze", "#DCEBF2"),
+        ("Quality", "#E5F1E2"), ("Reject", "#F7E0DC"),
+        ("Data Vault", "#E8E1F0"), ("Gold", "#F5EACB"),
+    ]
+    start_x = 5
+    width = 70
+    gap = 10
+    for position, (label, fill) in enumerate(labels):
+        x = start_x + position * (width + gap)
+        box(drawing, x, 61, width, label, fill)
+        if position < len(labels) - 1:
+            arrow(drawing, x + width, 76, x + width + gap, 76)
+    drawing.add(String(240, 104, "Contoso Lakehouse v2 - end-to-end architectuur",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    drawing.add(String(240, 41, "Metadata, audit en delivery-gate sturen alle lagen",
+                       textAnchor="middle", fontName="Helvetica-Oblique", fontSize=8,
+                       fillColor=colors.HexColor("#63727C")))
+    box(drawing, 155, 4, 85, "Metadata + Audit", "#EAF0F3")
+    arrow(drawing, 197, 35, 197, 60)
+    box(drawing, 286, 4, 85, "Unity Catalog", "#EAF0F3")
+    arrow(drawing, 328, 35, 328, 60)
+    return drawing
+
+
+def workflow_diagram() -> Drawing:
+    drawing = Drawing(480, 118)
+    labels = [
+        ("Validate", "#DCEBF2"), ("Manifest", "#DCEBF2"),
+        ("Bronze", "#DCEBF2"), ("Gate", "#F5EACB"),
+        ("Quality", "#E5F1E2"), ("Vault", "#E8E1F0"),
+        ("Gold", "#F5EACB"),
+    ]
+    start_x = 3
+    width = 58
+    gap = 11
+    for position, (label, fill) in enumerate(labels):
+        x = start_x + position * (width + gap)
+        box(drawing, x, 62, width, label, fill)
+        if position < len(labels) - 1:
+            arrow(drawing, x + width, 77, x + width + gap, 77)
+    drawing.add(String(240, 105, "Metadata-gedreven workflow en control plane",
+                       textAnchor="middle", fontName="Helvetica-Bold", fontSize=9,
+                       fillColor=colors.HexColor("#17324D")))
+    box(drawing, 55, 8, 95, "Reject + Reconcile", "#F7E0DC")
+    arrow(drawing, 82, 39, 82, 61)
+    box(drawing, 190, 8, 95, "Audit + Work-items", "#EAF0F3")
+    arrow(drawing, 237, 39, 237, 61)
+    box(drawing, 325, 8, 95, "Monitoring + SLO", "#EAF0F3")
+    arrow(drawing, 372, 39, 372, 61)
+    return drawing
 
 
 def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
@@ -163,6 +235,12 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
             text = inline_markup(heading.group(2))
             style = styles["ReportTitle"] if level == 1 and not story else styles["H1Report"] if level == 1 else styles["H2Report"]
             story.append(Paragraph(text, style))
+            if level == 1 and not any(isinstance(item, Drawing) for item in story):
+                story.append(Paragraph("Architectuur in beeld", styles["H2Report"]))
+                story.append(architecture_diagram())
+                story.append(Spacer(1, 7))
+                story.append(workflow_diagram())
+                story.append(Spacer(1, 8))
             index += 1
             continue
         if line.startswith("> "):

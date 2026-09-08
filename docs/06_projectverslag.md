@@ -1,7 +1,7 @@
 # Eindverslag - Contoso Lakehouse v2
 
 **Versie:** 2.0  
-**Datum:** 7 september 2026  
+**Datum:** 6 september 2026  
 **Status:** afgerond prototype, gevalideerd in `dev`  
 **Technologie:** Azure Databricks, Unity Catalog, Delta Lake, Databricks Workflows en Microsoft Fabric SQL Database als bron
 
@@ -159,11 +159,11 @@ standaard gepauzeerd en in `tst`/`prd` activeerbaar via de bundle-variabele
 
 De Databricks Asset Bundle is gevalideerd en naar `dev` gedeployed. De idempotente setup-job is na relevante DDL- en metadatawijzigingen succesvol uitgevoerd.
 
-Op 7 september 2026 is de stressleveringsgenerator aangescherpt na een instabiele run. De write-stap valideerde eerder exact het aantal part-files per object en kon daardoor falen bij adaptive Spark-planning. De generator accepteert nu elk positief aantal geschreven part-files, verwijdert vooraf eventuele stagingresten en geeft expliciete feedback over het daadwerkelijk geschreven aantal bestanden per object. Daarnaast geeft het notebook nu een duidelijkere melding bij hergebruik van een bestaande `delivery_date`.
+Op 6 september 2026 is de stressleveringsgenerator aangescherpt na een instabiele run. De write-stap valideerde eerder exact het aantal part-files per object en kon daardoor falen bij adaptive Spark-planning. De generator accepteert nu elk positief aantal geschreven part-files, verwijdert vooraf eventuele stagingresten en geeft expliciete feedback over het daadwerkelijk geschreven aantal bestanden per object. Daarnaast geeft het notebook nu een duidelijkere melding bij hergebruik van een bestaande `delivery_date`.
 
-De hervatting van Fase 2 van de Sales-stresstest is op 7 september 2026 operationeel geblokkeerd. Een lokale `databricks bundle validate --target dev` bereikte de dev-workspace, maar eindigde met HTTP 403 `Invalid access token`; er is daardoor geen job of datawijziging gestart. Vernieuw eerst de lokaal geconfigureerde Databricks-authenticatie en valideer de bundle opnieuw. Start daarna de pipeline voor `SALES`: de chronologische gate moet eerst `SALES|2026-09-10` verwerken en pas vervolgens `SALES|2026-09-11` met `change_set=1`. Controleer na beide succesvolle runs de SCD2-versies, deletes, hashdiffs en de actieve `SALES_MART`-publicatiegroep.
+De hervatting van Fase 2 van de Sales-stresstest is op 6 september 2026 operationeel geblokkeerd. Een lokale `databricks bundle validate --target dev` bereikte de dev-workspace, maar eindigde met HTTP 403 `Invalid access token`; er is daardoor geen job of datawijziging gestart. Vernieuw eerst de lokaal geconfigureerde Databricks-authenticatie en valideer de bundle opnieuw. Start daarna de pipeline voor `SALES`: de chronologische gate moet eerst `SALES|2026-09-10` verwerken en pas vervolgens `SALES|2026-09-11` met `change_set=1`. Controleer na beide succesvolle runs de SCD2-versies, deletes, hashdiffs en de actieve `SALES_MART`-publicatiegroep.
 
-Na vernieuwde CLI-authenticatie valideerde de Asset Bundle op 7 september 2026 succesvol voor `dev`. Pipelinerun `775524928887640` startte voor `SALES` en eindigde technisch succesvol na 244 seconden. Metadata-validatie en alle vijf Bronze-objecttaken slaagden; de delivery-gate gaf `SKIPPED` terug en zette de conditionele vervolgroute correct uit. Daardoor startten Quality, Vault en Gold niet. De gate retourneert uitsluitend `SKIPPED` wanneer `v_next_processable_delivery` geen complete, nog niet verwerkte Sales-delivery bevat. De eerder genoemde folders `2026-09-10` en `2026-09-11` zijn in deze runtime dus niet beschikbaar als verwerkbare wachtrij of voldoen niet aan het actuele metadata-contract; vervolgonderzoek vereist read-only inspectie van `audit_delivery`, `audit_delivery_object` en de Gold-publicatiegroep.
+Na vernieuwde CLI-authenticatie valideerde de Asset Bundle op 6 september 2026 succesvol voor `dev`. Pipelinerun `775524928887640` startte voor `SALES` en eindigde technisch succesvol na 244 seconden. Metadata-validatie en alle vijf Bronze-objecttaken slaagden; de delivery-gate gaf `SKIPPED` terug en zette de conditionele vervolgroute correct uit. Daardoor startten Quality, Vault en Gold niet. De gate retourneert uitsluitend `SKIPPED` wanneer `v_next_processable_delivery` geen complete, nog niet verwerkte Sales-delivery bevat. De eerder genoemde folders `2026-09-10` en `2026-09-11` zijn in deze runtime dus niet beschikbaar als verwerkbare wachtrij of voldoen niet aan het actuele metadata-contract; vervolgonderzoek vereist read-only inspectie van `audit_delivery`, `audit_delivery_object` en de Gold-publicatiegroep.
 
 ### Bewezen scenario's
 
@@ -246,7 +246,7 @@ Op verzoek is een kritische review uitgevoerd vanuit het perspectief Principal D
 
 Besluit: fundament (metadata-gedrevenheid, gate, rejects, atomische publicatie) is enterprise-waardig; prioriteit ligt bij delete-/rename-semantiek, CDC + PARTIAL_SNAPSHOT, metadata-CI/CD en tiering van de gate.
 
-## 12. Verwerking review — 7 september 2026
+## 12. Verwerking review — 6 september 2026
 
 Eerste, laag-risico reeks verbeteringen is doorgevoerd:
 
@@ -257,7 +257,7 @@ Eerste, laag-risico reeks verbeteringen is doorgevoerd:
 
 Nog openstaand (bewust niet in deze ronde): implementatie van `INCREMENTAL_CDC` en `PARTIAL_SNAPSHOT`, incrementeel venster in Gold-MERGE, gate-tiering op `criticality`, en cycle-detectie op de afhankelijkheidsgraaf.
 
-## 13. Verwerking resterende reviewpunten — 7 september 2026 (tweede ronde)
+## 13. Verwerking resterende reviewpunten — 6 september 2026 (tweede ronde)
 
 De vier bewust uitgestelde punten zijn nu alsnog doorgevoerd en getest; de volledige regressiesuite staat inmiddels op 131/131 groen:
 
@@ -268,14 +268,14 @@ De vier bewust uitgestelde punten zijn nu alsnog doorgevoerd en getest; de volle
 
 Correctie op paragraaf 11: Gold Actueel publiceert al atomisch per publicatiegroep via één gedeelde releasepointer (`publish_group`), waardoor het eerdergenoemde inconsistentievenster binnen een groep niet bestaat.
 
-## 14. Liquid clustering metadata-gedreven gemaakt — 7 september 2026
+## 14. Liquid clustering metadata-gedreven gemaakt — 6 september 2026
 
 - De Gold-DDL gebruikte al `CLUSTER BY`, maar de metadata heette nog `zorder_columns` en was niet leidend. Dat is nu rechtgetrokken.
 - [meta_gold_entity.json](../metadata/seed/meta_gold_entity.json): alle 23 Gold-entiteiten gebruiken `cluster_columns`; `zorder_columns` is volledig verdwenen. Feiten behouden `partition_columns` op datum; dimensies gebruiken uitsluitend clustering op hun hash-key.
 - [metadata.py](../src/contoso_lakehouse/metadata.py): `GoldEntity` draagt nu `partition_columns` en `cluster_columns`, zodat de setup-notebook de DDL metadata-gedreven kan genereren.
 - Bestaande tabellen vereisen een eenmalige `ALTER TABLE ... CLUSTER BY` of rebuild; liquid clustering werkt incrementeel en vereist daarna minder `OPTIMIZE`-onderhoud dan ZORDER.
 
-## 15. Verwerking architectuurreview — 7 september 2026 (derde ronde)
+## 15. Verwerking architectuurreview — 6 september 2026 (derde ronde)
 
 De resterende aantoonbare reviewrisico's zijn in de runtime en metadata-CI verwerkt:
 
@@ -288,7 +288,7 @@ Correctie op de review: de historische Gold-load is reeds SCD2-conform voor de b
 
 De nog noodzakelijke productieactiviteit is een schaal- en hersteltest met gelijktijdige jobs, lease-conflict, foutinjectie tussen Gold-statustransities en realistische Delta-concurrentie. De lokale regressiesuite dekt contracten en SQL-generatie, geen runtime-capaciteit of RPO/RTO.
 
-## 16. Delivery-manifest als gatecontract — 7 september 2026
+## 16. Delivery-manifest als gatecontract — 6 september 2026
 
 `audit_delivery_manifest` is toegevoegd als centrale verklaring dat een
 delivery volledig is gepubliceerd. Het contract bewaart de bron, het fysieke
@@ -308,7 +308,7 @@ praktische productievalidatie is een run met een bewust ontbrekend bestand en
 een onvolledig manifest: de gate moet gesloten blijven en een latere delivery
 mag de chronologische wachtrij niet passeren.
 
-## 17. Generieke push-manifestregistratie — 7 september 2026
+## 17. Generieke push-manifestregistratie — 6 september 2026
 
 De pipeline voert nu vóór de Bronze fan-out notebook 04 uit. Deze taak scant
 uitsluitend datumfolders van het geselecteerde bronsysteem en leest alleen
@@ -323,7 +323,7 @@ fysieke rootmanifest; de nieuwe generieke taak registreert dit vervolgens
 idempotent in audit. Daarmee is er voor beide aanleverpatronen een gelijk
 delivery-gatecontract zonder bronspecifieke orkestratie.
 
-## 18. Control plane: state machine en work-items — 7 september 2026
+## 18. Control plane: state machine en work-items — 6 september 2026
 
 Delivery-statussen worden niet langer uitsluitend in losse notebooks gewijzigd.
 `AuditLogger.transition_delivery` valideert toegestane overgangen en schrijft
@@ -339,7 +339,7 @@ backend voor een toekomstige planner en read-only operations-app. Bronze blijft
 bewust buiten deze automatische koppeling, omdat een Auto Loader-microbatch
 meerdere deliveries kan bevatten.
 
-## 19. Policy-driven Delta-onderhoud — 7 september 2026
+## 19. Policy-driven Delta-onderhoud — 6 september 2026
 
 De eerdere brede maintenance-loop met een globale VACUUM-retentie is vervangen
 door `meta_table_maintenance_policy`. De Git-beheerde basispolicies scheiden
@@ -353,7 +353,7 @@ worden alleen plannen geregistreerd. Een productie-run voert uitsluitend
 `OPTIMIZE` en `VACUUM` uit wanneer een actieve policy bestaat, de filedrempel is
 bereikt en geen succesvolle optimalisatie binnen het policy-interval bestaat.
 
-## 20. Metadata release-gate — 7 september 2026
+## 20. Metadata release-gate — 6 september 2026
 
 De dependency-vrije command `python -m contoso_lakehouse.release_check`
 valideert de volledige Git-seed vóór deployment. De gate controleert JSON,
@@ -365,7 +365,7 @@ De release-check is bedoeld als eerste CI-gate. `pytest -q` levert de
 regressiedekking en notebook 99 blijft de tweede, Databricks-runtimegerichte
 gate voor `EXPLAIN`, metadataexpressies en Unity Catalog-objecten.
 
-## 21. Operationele SLO-monitoring — 7 september 2026
+## 21. Operationele SLO-monitoring — 6 september 2026
 
 Notebook 43 en een zelfstandige, halfuurlijkse Databricks Workflow bewaken de
 control plane. De job faalt bewust bij een manifest dat de freshness-SLA
@@ -379,7 +379,7 @@ in `audit_delivery_manifest`, `audit_work_item`,
 `audit_gold_publication_lease` en de extra queries in
 `sql/01_metadata/13_monitoring_queries.sql`.
 
-## 22. Bronze-to-Quality reconciliatie — 7 september 2026
+## 22. Bronze-to-Quality reconciliatie — 6 september 2026
 
 Pipeline notebook 21 vergelijkt per object en delivery de gefilterde
 Bronze-invoer met het totaal van Quality en Reject. Het resultaat wordt
@@ -390,7 +390,7 @@ De controle beschermt tegen stille recordverliezen door filters, retries of
 schrijffouten. Afwijkingen zijn operationeel zichtbaar via de extra query in
 `sql/01_metadata/13_monitoring_queries.sql`.
 
-## 23. Governancebeleid en least privilege — 7 september 2026
+## 23. Governancebeleid en least privilege — 6 september 2026
 
 `meta_data_governance_policy` koppelt ieder bronsysteem aan eigenaar, steward,
 domein, PII-classificatie, retentie, kostenplaats en SLA-tier. De lokale
@@ -402,7 +402,7 @@ op metadata. Productiemutaties op metadata, Vault en Gold verlopen via de
 deployment identity. Dit voorkomt dat een ad-hoc wijziging de Git-beheerde
 metadatarelease of actieve pipelinecontracten omzeilt.
 
-## 24. Gecontroleerd dead-letter herstel — 7 september 2026
+## 24. Gecontroleerd dead-letter herstel — 6 september 2026
 
 Een `DEAD_LETTER` work-item kan nu via een handmatige Databricks Workflow naar
 `PENDING` worden teruggezet. De actie eist delivery, laag, entiteit, reden,
@@ -411,7 +411,7 @@ append-only. Het remediationnotebook voert zelf geen data-load uit; een
 volgende pipeline-run moet de heropende stap opnieuw claimen met een nieuwe
 lease. Dit houdt herstel en uitvoering gescheiden en herleidbaar.
 
-## 25. Gold als data product — 7 september 2026
+## 25. Gold als data product — 6 september 2026
 
 `meta_gold_data_product` definieert per actuele Gold-publicatiegroep de
 productnaam, eigenaar, steward, consumptiegroep, refresh-SLA en
@@ -420,7 +420,7 @@ iedere actieve `CURRENT`-groep. Daardoor zijn Gold-marts niet langer alleen
 tabellen met een technische publicatie, maar expliciete data-producten met een
 afnemerscontract.
 
-## 26. Compacte Satellite current-state — 7 september 2026
+## 26. Compacte Satellite current-state — 6 september 2026
 
 De Data Vault-loader gebruikt voor hashdiffvergelijking nu een compacte,
 per-satellite `__current_state`-tabel. Deze bootstrappt éénmalig uit de
@@ -430,7 +430,7 @@ de steeds groeiende `*_h`-historie. Het Data Vault-contract blijft intact:
 historische Satellites zijn append-only en Gold leest nog altijd de view met
 afgeleide `load_end_date` en `is_current`.
 
-## 27. Delta column defaults in control-plane-DDL — 7 september 2026
+## 27. Delta column defaults in control-plane-DDL — 6 september 2026
 
 De setup gaf `WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED` voor nieuwe
 control-plane-tabellen met kolomdefaults. Alle metadata- en audittabellen die
@@ -448,7 +448,7 @@ controleert voortaan deze DDL-scheiding en de afsluiting van de schema-drifttabe
 
 ## 28. Overdracht naar 8 september 2026
 
-De Databricks-authenticatie is op 7 september vernieuwd via profiel `d` voor de
+De Databricks-authenticatie is op 6 september vernieuwd via profiel `d` voor de
 `dev`-workspace. De Asset Bundle valideerde daarna succesvol en is gedeployed
 naar:
 

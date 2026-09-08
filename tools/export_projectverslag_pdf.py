@@ -363,6 +363,21 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
                 story.append(Spacer(1, 7))
             index += 1
             continue
+        image_match = re.match(r"^!\[[^]]*\]\(([^)]+)\)$", line.strip())
+        if image_match:
+            image_path = SOURCE.parent / image_match.group(1)
+            if image_path.exists():
+                image_width, image_height = ImageReader(str(image_path)).getSize()
+                scale = min((174 * mm) / image_width, (42 * mm) / image_height)
+                story.append(Image(
+                    str(image_path),
+                    width=image_width * scale,
+                    height=image_height * scale,
+                    hAlign="CENTER",
+                ))
+                story.append(Spacer(1, 8))
+            index += 1
+            continue
         if line.startswith("> "):
             story.append(Paragraph(inline_markup(line[2:]), styles["QuoteReport"]))
         elif re.match(r"^\s*[-*]\s+", line):

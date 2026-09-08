@@ -1,6 +1,6 @@
 # Verslag praktijkexperiment - Contoso Lakehouse op Azure Databricks
 
-![Contoso Lakehouse header](contoso-lakehouse-header.svg)
+![Contoso Lakehouse header](contoso-lakehouse-header.png)
 
 **Versie:** 2.0  
 **Datum:** 6 september 2026  

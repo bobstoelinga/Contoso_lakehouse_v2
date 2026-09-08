@@ -377,11 +377,6 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
 
     screenshots = [
         ("Overzicht", "overzicht.png"),
-        ("Deliveries", "deliveries.png"),
-        ("Runs & Gold", "runs-gold.png"),
-        ("Processen", "processen.png"),
-        ("Flow Setup", "flow-setup.png"),
-        ("Operatoracties", "operatoracties.png"),
     ]
     screenshot_dir = ROOT / "docs" / "app-screenshots"
     available_screenshots = [
@@ -391,9 +386,9 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
     ]
     if available_screenshots:
         story.append(PageBreak())
-        story.append(Paragraph("Bijlage A - Schermafdrukken van de Streamlit-app", styles["H1Report"]))
+        story.append(Paragraph("Bijlage A - Schermafdruk van de Streamlit-app", styles["H1Report"]))
         story.append(Paragraph(
-            "De volgende schermafdrukken tonen de verschillende pagina's van de Contoso Control Room.",
+            "Het onderstaande scherm toont het eerste overzicht van de Contoso Control Room.",
             styles["BodyReport"],
         ))
         for label, screenshot_path in available_screenshots:
@@ -416,7 +411,7 @@ def add_page(canvas, document):
     canvas.line(18 * mm, 14 * mm, 192 * mm, 14 * mm)
     canvas.setFont("SegoeUI", 7)
     canvas.setFillColor(colors.HexColor("#63727C"))
-    canvas.drawString(18 * mm, 9 * mm, "Contoso Lakehouse v2 | Projectverslag")
+    canvas.drawString(18 * mm, 9 * mm, "Contoso Lakehouse | Praktijkexperiment")
     canvas.drawRightString(192 * mm, 9 * mm, f"Pagina {document.page}")
     canvas.restoreState()
 
@@ -426,7 +421,7 @@ def main() -> None:
     story = build_story(SOURCE.read_text(encoding="utf-8"), regular, bold, mono)
     document = SimpleDocTemplate(
         str(OUTPUT), pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
-        topMargin=16 * mm, bottomMargin=19 * mm, title="Contoso Lakehouse v2 - Projectverslag",
+        topMargin=16 * mm, bottomMargin=19 * mm, title="Contoso Lakehouse - Praktijkexperiment",
         author="Contoso Lakehouse projectteam",
     )
     document.build(story, onFirstPage=add_page, onLaterPages=add_page)

@@ -1,13 +1,17 @@
-# Eindverslag - Contoso Lakehouse v2
+# Verslag praktijkexperiment - Contoso Lakehouse op Azure Databricks
+
+![Contoso Lakehouse header](contoso-lakehouse-header.svg)
 
 **Versie:** 2.0  
 **Datum:** 6 september 2026  
 **Status:** afgerond prototype, gevalideerd in `dev`  
 **Technologie:** Azure Databricks, Unity Catalog, Delta Lake, Databricks Workflows en Microsoft Fabric SQL Database als bron
 
+> **AI-verantwoording:** dit document en het onderliggende praktijkexperiment zijn tot stand gekomen in nauwe samenwerking tussen mens en AI (GitHub Copilot). AI is ingezet voor ontwerp, implementatie, tests en documentatie; sturing, besluitvorming, review en validatie van de resultaten kwamen van de mens. Deze samenwerking heeft de kwaliteit en snelheid van het experiment versterkt.
+
 ## 1. Managementsamenvatting
 
-Dit project realiseert een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-ontwerpprincipes**. Het prototype verwerkt bestandsleveringen en externe pull-bronnen via Landing Volume, Bronze, Quality/Reject, Data Vault of Reference Data, historisch Gold en actueel Gold.
+Dit praktijkexperiment realiseert een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-geïnspireerde ontwerpprincipes**. Het prototype verwerkt bestandsleveringen en externe pull-bronnen via Landing Volume, Bronze, Quality/Reject, Data Vault of Reference Data, historisch Gold en actueel Gold.
 
 De runtime en governance-laag zijn Azure Databricks, Unity Catalog en Delta Lake. Microsoft Fabric is aangesloten als werkende SQL-bron: een Fabric SQL Database wordt met JDBC uitgelezen, schrijft een immutable Parquet-levering naar het Databricks Landing Volume en wordt vervolgens door dezelfde metadata-gedreven keten verwerkt. Dit is dus geen native Fabric Lakehouse-implementatie.
 
@@ -251,7 +255,7 @@ Het advies is: **nog niet vrijgeven voor productie**, maar het resultaat wel acc
 
 De doelstelling is gerealiseerd. Er staat een metadata-gedreven Lakehouse-prototype waarin bronnen via Landing gecontroleerd worden verwerkt, datakwaliteit en afwijzingen traceerbaar zijn, historisatie via Data Vault of versioned Reference Data plaatsvindt en Gold Actueel uitsluitend na een volledige succesvolle run atomisch wordt gepubliceerd.
 
-De uitvoering toont bovendien dat het ontwerp onder realistische fouten beheersbaar blijft. Schema-drift, een onvolledig bedragcontract en een ontbrekende rejectvoorziening zijn onderzocht, structureel hersteld en opnieuw gevalideerd. Daarmee is dit meer dan een architectuurtekening: een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-ontwerpprincipes**.
+De uitvoering toont bovendien dat het ontwerp onder realistische fouten beheersbaar blijft. Schema-drift, een onvolledig bedragcontract en een ontbrekende rejectvoorziening zijn onderzocht, structureel hersteld en opnieuw gevalideerd. Daarmee is dit meer dan een architectuurtekening: een **werkend, aantoonbaar gevalideerd metadata-gedreven Lakehouse-prototype met enterprise-geïnspireerde ontwerpprincipes**.
 
 Voor technische verdieping wordt verwezen naar [architectuur](01_architecture.md), [workflowontwerp](05_workflow_design.md) en de [besluitenlog](00_besluitenlog.md).
 
@@ -269,7 +273,7 @@ Op verzoek is een kritische review uitgevoerd vanuit het perspectief Principal D
 - **Gold Actueel**: slotwisseling is per entiteit (inconsistentievenster binnen een publication group); soft deletes verdwijnen stilletjes uit de actuele mart; rollback beperkt tot één versie.
 - **Fabric**: hybride landschap vereist expliciete keuzes rond OneLake-shortcuts, tweede security-perimeter en eigenaarschap van de actuele mart.
 
-Besluit: fundament (metadata-gedrevenheid, gate, rejects, atomische publicatie) is enterprise-waardig; prioriteit ligt bij delete-/rename-semantiek, CDC + PARTIAL_SNAPSHOT, metadata-CI/CD en tiering van de gate.
+Besluit: fundament (metadata-gedrevenheid, gate, rejects, atomische publicatie) biedt een solide basis richting enterprise-niveau, met nog openstaande risico's; prioriteit ligt bij delete-/rename-semantiek, CDC + PARTIAL_SNAPSHOT, metadata-CI/CD en tiering van de gate.
 
 ## 12. Verwerking review — 6 september 2026
 
@@ -471,7 +475,7 @@ ongeluk in de definitie van `meta_schema_drift_approval`. Dit is hersteld; de
 audittabellen staan uitsluitend in `11_audit_model.sql`. Een regressietest
 controleert voortaan deze DDL-scheiding en de afsluiting van de schema-drifttabel.
 
-## 28. Overdracht naar 8 september 2026
+## 28. Overdracht naar 6 september 2026
 
 De Databricks-authenticatie is op 6 september vernieuwd via profiel `d` voor de
 `dev`-workspace. De Asset Bundle valideerde daarna succesvol en is gedeployed
@@ -518,7 +522,7 @@ delivery-gate, Quality/reject, Data Vault en de atomische Gold-publicatie. Pas n
 deze succesvolle runtimeketen en een schaal-/hersteltest kan productie-readiness
 opnieuw worden beoordeeld.
 
-## 29. Werkzaamheden 8 september 2026
+## 29. Werkzaamheden 6 september 2026
 
 De operationele en deploymentlaag is verder uitgewerkt. De belangrijkste
 resultaten van vandaag zijn:
@@ -591,15 +595,14 @@ catalogus- en schemarechten. De deployment is technisch geslaagd; de nog open
 staande netwerk-, Azure-RBAC-, observability-, kosten- en RPO/RTO-controles
 blijven productievoorwaarden.
 
-### Bijlage A: actuele appbeelden
+### Bijlage A: actuele appbeeld
 
-De PDF bevat zes schermafdrukken uit de Control Room: **Overzicht**,
-**Deliveries**, **Runs & Gold**, **Processen**, **Flow Setup** en
-**Operatoracties**. De beelden zijn opgenomen als overdrachtsbewijs van de
-interface en de beschikbare bedieningsvlakken. De gedeployde app kon tijdens
-het vastleggen wel renderen, maar gaf een Databricks SQL-bereikbaarheidsmelding;
-de inhoudelijke tabellen verschijnen pas wanneer het SQL Warehouse en de
-app-serviceprincipal beschikbaar zijn.
+De PDF bevat één schermafdruk uit de Control Room: **Overzicht**. Het beeld is
+opgenomen als overdrachtsbewijs van de eerste interface en de basale
+bedieningsvlakken. De gedeployde app kon tijdens het vastleggen wel renderen,
+maar gaf een Databricks SQL-bereikbaarheidsmelding; de inhoudelijke tabellen
+verschijnen pas wanneer het SQL Warehouse en de app-serviceprincipal
+beschikbaar zijn.
 
 De lokale release-gate bleef geldig met fingerprint
 `7996f205699885cdebc7b488a9f384b2e2fac9b5688873a04c2eed1e1b6ef61a`.

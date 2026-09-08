@@ -32,8 +32,9 @@ st.markdown(
     [data-testid="stSidebar"] { background: #102a43; }
     [data-testid="stSidebar"] * { color: #e8f1f7; }
     .hero { background: linear-gradient(120deg,#102a43 0%,#1f5268 62%,#2b7a78 100%); color:white; border-radius:14px; padding:28px 32px; margin:0 0 24px; }
-    .hero h1 { font-size:2.2rem; margin:0 0 8px; letter-spacing:0; }
-    .hero p { color:#d7e8ef; margin:0; font-size:1rem; }
+    .hero h1 { font-family:'Aptos Display','Segoe UI',sans-serif; font-size:2.2rem; margin:0 0 8px; letter-spacing:0; }
+    .hero p { font-family:'Aptos','Segoe UI',sans-serif; color:#d7e8ef; margin:0 0 6px; font-size:1rem; }
+    .hero .ai-credit { font-family:'Aptos','Segoe UI',sans-serif; color:#b9d8df; margin:0; font-size:.88rem; font-weight:700; letter-spacing:.04em; }
     .section-label { color:#2b7a78; font-size:.75rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin:22px 0 8px; }
     div[data-testid="stMetric"] { background:white; border:1px solid var(--line); border-radius:10px; padding:14px 16px; box-shadow:0 2px 8px rgba(16,42,67,.04); }
     .status-ok { color:#18794e; font-weight:700; }
@@ -1145,7 +1146,7 @@ if st.sidebar.button("Ververs data"):
 st.sidebar.markdown('<p class="caption">Data ververst maximaal elke 30 seconden.</p>', unsafe_allow_html=True)
 
 st.markdown(
-    '<div class="hero"><h1>Contoso Control Room</h1><p>Operationele gezondheid van deliveries, quality, Vault en Gold.</p></div>',
+    '<div class="hero"><h1>Contoso Lakehouse</h1><p>Praktijkexperiment in governance, pipelinecontrole en metadata-orchestratie</p><p class="ai-credit">Developed in VS Code &amp; Databricks with A.I.</p></div>',
     unsafe_allow_html=True,
 )
 

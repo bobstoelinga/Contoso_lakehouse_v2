@@ -1,0 +1,54 @@
+<svg width="1280" height="300" viewBox="0 0 1280 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="300" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F8FC"/>
+      <stop offset="1" stop-color="#EDF3F9"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#122B44"/>
+      <stop offset="1" stop-color="#1A3D62"/>
+    </linearGradient>
+    <linearGradient id="line" x1="90" y1="70" x2="286" y2="214" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A9D9FF"/>
+      <stop offset="0.52" stop-color="#5B9ED9"/>
+      <stop offset="1" stop-color="#1E3E63"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="13" flood-color="#10243B" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="300" rx="26" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="56" width="224" height="188" rx="28" fill="url(#panel)"/>
+    <rect x="94" y="70" width="196" height="160" rx="20" stroke="url(#line)" stroke-width="2"/>
+
+    <g>
+      <path d="M170 100L210 82L250 100V154L210 173L170 154V100Z" fill="#173B5D" stroke="#8EC8EE" stroke-width="2"/>
+      <path d="M170 100L210 120L250 100" stroke="#8EC8EE" stroke-width="2"/>
+      <path d="M170 154L210 120L250 154" stroke="#8EC8EE" stroke-width="2"/>
+      <path d="M210 82V173" stroke="#8EC8EE" stroke-width="2"/>
+
+      <circle cx="210" cy="120" r="16" fill="#F3F9FF"/>
+      <path d="M210 107V133" stroke="#173B5D" stroke-width="3" stroke-linecap="round"/>
+      <path d="M196 120H224" stroke="#173B5D" stroke-width="3" stroke-linecap="round"/>
+
+      <circle cx="132" cy="120" r="5.5" fill="#8ED4FF"/>
+      <circle cx="288" cy="120" r="5.5" fill="#8ED4FF"/>
+      <circle cx="210" cy="92" r="5.5" fill="#8ED4FF"/>
+      <circle cx="210" cy="148" r="5.5" fill="#8ED4FF"/>
+
+      <path d="M132 120H170" stroke="#8ED4FF" stroke-width="2" stroke-linecap="round"/>
+      <path d="M250 120H288" stroke="#8ED4FF" stroke-width="2" stroke-linecap="round"/>
+      <path d="M210 92V106" stroke="#8ED4FF" stroke-width="2" stroke-linecap="round"/>
+      <path d="M210 148V134" stroke="#8ED4FF" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g>
+    <text x="392" y="108" fill="#142D45" font-family="Aptos Display, Segoe UI, sans-serif" font-weight="700" font-size="48">Contoso Lakehouse</text>
+    <text x="394" y="158" fill="#465F7A" font-family="Aptos, Segoe UI, sans-serif" font-size="25">Praktijkexperiment in governance, pipelinecontrole en metadata-orchestratie</text>
+    <text x="394" y="204" fill="#4B6C8E" font-family="Aptos, Segoe UI, sans-serif" font-weight="700" font-size="20" letter-spacing="0.8">Developed in VS Code &amp; Databricks with A.I.</text>
+  </g>
+</svg>

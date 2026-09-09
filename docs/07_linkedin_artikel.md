@@ -6,7 +6,7 @@ In dit praktijkexperiment heb ik samen met AI een metadata-gedreven lakehouse vo
 
 AI versnelde de analyse, uitwerking, tests en documentatie. Ik bepaalde de requirements, stelde de kritische vragen, koos de grenzen en beoordeelde de uitkomst. Dat onderscheid is belangrijk: AI kan opties genereren en patronen helpen uitwerken, maar productierisico's wegen en een release accepteren blijft mensenwerk.
 
-Het volledige project en de technische documentatie staan op [GitHub](https://github.com/bobstoelinga/Contoso_lakehouse_v2). Het [projectverslag](https://github.com/bobstoelinga/Contoso_lakehouse_v2/blob/main/docs/06_projectverslag.md) bevat de requirements, besluiten, testresultaten en openstaande acties.
+Het volledige project en de technische documentatie staan op [GitHub](https://github.com/bobstoelinga/Contoso_lakehouse_v2). Het [projectverslag](https://github.com/bobstoelinga/Contoso_lakehouse_v2/blob/main/docs/06_praktijk_experiment_verslag.md) bevat de requirements, besluiten, testresultaten en openstaande acties.
 
 ## De opdracht
 

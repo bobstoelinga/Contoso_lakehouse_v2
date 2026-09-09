@@ -2,7 +2,7 @@
 
 **Versie:** 2.0  
 **Datum:** 6 september 2026  
-**Status:** afgerond prototype, gevalideerd in `dev`  
+**Status:** prototype in ontwikkeling  
 **Technologie:** Azure Databricks, Unity Catalog, Delta Lake, Databricks Workflows en Microsoft Fabric SQL Database als bron
 
 > **AI-verantwoording:** dit document en het onderliggende praktijkexperiment zijn tot stand gekomen in nauwe samenwerking tussen mens en AI (GitHub Copilot). AI is ingezet voor ontwerp, implementatie, tests en documentatie; sturing, besluitvorming, review en validatie van de resultaten kwamen van de mens. Deze samenwerking heeft de kwaliteit en snelheid van het experiment versterkt.
@@ -242,9 +242,11 @@ naar audit-tabellen, maar starten de bestaande Databricks-remediation- en
 maintenance-jobs. Reden, uitvoerder en approval/change-referentie zijn daarbij
 verplicht.
 
-**Open de applicatie:** [Contoso Control Room](https://contoso-control-room-7405619535862062.2.azure.databricksapps.com/)
+**Open de applicatie:** [Contoso Control Room](https://contoso-control-room-7405619535862062.2.azure.databricksapps.com/)  
+https://contoso-control-room-7405619535862062.2.azure.databricksapps.com/
 
-**Open de workspace:** [Databricks](https://adb-7405619535862062.2.azuredatabricks.net/?o=7405619535862062)
+**Open de workspace:** [Databricks](https://adb-7405619535862062.2.azuredatabricks.net/?o=7405619535862062)  
+https://adb-7405619535862062.2.azuredatabricks.net/?o=7405619535862062
 
 De broncode staat in [app/streamlit_app.py](../app/streamlit_app.py) en de
 lokale/deploymentinstructies staan in [app/README.md](../app/README.md).

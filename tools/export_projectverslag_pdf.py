@@ -27,8 +27,8 @@ from reportlab.lib.utils import ImageReader
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "docs" / "06_projectverslag.md"
-OUTPUT = ROOT / "docs" / "06_projectverslag.pdf"
+SOURCE = ROOT / "docs" / "06_praktijk_experiment_verslag.md"
+OUTPUT = ROOT / "docs" / "06_praktijk_experiment_verslag.pdf"
 
 
 def register_fonts() -> tuple[str, str, str]:
@@ -413,10 +413,10 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
             styles["BodyReport"],
         ))
         for screenshot_index, (label, screenshot_path) in enumerate(available_screenshots):
-            if screenshot_index:
+            if screenshot_index and screenshot_index % 2 == 0:
                 story.append(PageBreak())
             image_width, image_height = ImageReader(str(screenshot_path)).getSize()
-            scale = min((174 * mm) / image_width, (205 * mm) / image_height)
+            scale = min((174 * mm) / image_width, (92 * mm) / image_height)
             story.append(KeepTogether([
                 Paragraph(label, styles["H2Report"]),
                 Image(

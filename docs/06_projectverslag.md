@@ -1,5 +1,3 @@
-# Verslag praktijkexperiment - Contoso Lakehouse op Azure Databricks
-
 ![Contoso Lakehouse header](contoso-lakehouse-header.png)
 
 **Versie:** 2.0  
@@ -595,14 +593,12 @@ catalogus- en schemarechten. De deployment is technisch geslaagd; de nog open
 staande netwerk-, Azure-RBAC-, observability-, kosten- en RPO/RTO-controles
 blijven productievoorwaarden.
 
-### Bijlage A: actuele appbeeld
+### Bijlage A: actuele appbeelden
 
-De PDF bevat één schermafdruk uit de Control Room: **Overzicht**. Het beeld is
-opgenomen als overdrachtsbewijs van de eerste interface en de basale
-bedieningsvlakken. De gedeployde app kon tijdens het vastleggen wel renderen,
-maar gaf een Databricks SQL-bereikbaarheidsmelding; de inhoudelijke tabellen
-verschijnen pas wanneer het SQL Warehouse en de app-serviceprincipal
-beschikbaar zijn.
+De PDF bevat schermafdrukken van de Control Room voor **Delivery control
+plane**, **Runs en Gold-publicaties**, **Procesregie** en **Flow Setup**.
+Samen tonen zij de operationele inzichten, procesregie en brononboarding van
+de interface.
 
 De lokale release-gate bleef geldig met fingerprint
 `7996f205699885cdebc7b488a9f384b2e2fac9b5688873a04c2eed1e1b6ef61a`.

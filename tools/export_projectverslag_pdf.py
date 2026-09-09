@@ -351,7 +351,7 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
             text = inline_markup(heading.group(2))
             style = styles["ReportTitle"] if level == 1 and not story else styles["H1Report"] if level == 1 else styles["H2Report"]
             story.append(Paragraph(text, style))
-            if level == 1 and not any(isinstance(item, Drawing) for item in story):
+            if heading.group(2).startswith("1. Managementsamenvatting"):
                 story.append(Paragraph("Architectuur in beeld", styles["H2Report"]))
                 story.append(architecture_diagram())
                 story.append(Spacer(1, 7))
@@ -391,7 +391,10 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
         index += 1
 
     screenshots = [
-        ("Overzicht", "overzicht.png"),
+        ("Delivery control plane", "deliveries.png"),
+        ("Runs en Gold-publicaties", "runs-gold.png"),
+        ("Procesregie", "processen.png"),
+        ("Flow Setup", "flow-setup.png"),
     ]
     screenshot_dir = ROOT / "docs" / "app-screenshots"
     available_screenshots = [
@@ -401,22 +404,26 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
     ]
     if available_screenshots:
         story.append(PageBreak())
-        story.append(Paragraph("Bijlage A - Schermafdruk van de Streamlit-app", styles["H1Report"]))
+        story.append(Paragraph("Bijlage A - Schermafdrukken van de Streamlit-app", styles["H1Report"]))
         story.append(Paragraph(
-            "Het onderstaande scherm toont het eerste overzicht van de Contoso Control Room.",
+            "De onderstaande schermen tonen de belangrijkste bedienings- en inzichtsvlakken van de Contoso Control Room.",
             styles["BodyReport"],
         ))
-        for label, screenshot_path in available_screenshots:
-            story.append(Paragraph(label, styles["H2Report"]))
+        for screenshot_index, (label, screenshot_path) in enumerate(available_screenshots):
+            if screenshot_index:
+                story.append(PageBreak())
             image_width, image_height = ImageReader(str(screenshot_path)).getSize()
-            scale = min((174 * mm) / image_width, (235 * mm) / image_height)
-            story.append(Image(
-                str(screenshot_path),
-                width=image_width * scale,
-                height=image_height * scale,
-                hAlign="CENTER",
-            ))
-            story.append(Spacer(1, 8))
+            scale = min((174 * mm) / image_width, (205 * mm) / image_height)
+            story.append(KeepTogether([
+                Paragraph(label, styles["H2Report"]),
+                Image(
+                    str(screenshot_path),
+                    width=image_width * scale,
+                    height=image_height * scale,
+                    hAlign="CENTER",
+                ),
+                Spacer(1, 8),
+            ]))
     return story
 
 

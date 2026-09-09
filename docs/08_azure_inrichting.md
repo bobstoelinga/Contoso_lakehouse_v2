@@ -1,6 +1,6 @@
 # Azure-inrichting en technische specificaties
 
-**Datum:** 8 september 2026  
+**Datum:** 6 september 2026  
 **Status:** actuele prototype-inventarisatie voor `dev`
 
 Dit document beschrijft wat in Azure en Azure Databricks nodig is om het

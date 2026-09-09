@@ -391,10 +391,13 @@ def build_story(source: str, font_regular: str, font_bold: str, font_mono: str):
         index += 1
 
     screenshots = [
+        ("Overzicht", "overzicht.png"),
         ("Delivery control plane", "deliveries.png"),
         ("Runs en Gold-publicaties", "runs-gold.png"),
         ("Procesregie", "processen.png"),
         ("Flow Setup", "flow-setup.png"),
+        ("ETL-oplossingen", "etl-oplossingen.png"),
+        ("Operatoracties", "operatoracties.png"),
     ]
     screenshot_dir = ROOT / "docs" / "app-screenshots"
     available_screenshots = [

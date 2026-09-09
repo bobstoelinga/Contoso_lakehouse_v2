@@ -244,6 +244,8 @@ verplicht.
 
 **Open de applicatie:** [Contoso Control Room](https://contoso-control-room-7405619535862062.2.azure.databricksapps.com/)
 
+**Open de workspace:** [Databricks](https://adb-7405619535862062.2.azuredatabricks.net/?o=7405619535862062)
+
 De broncode staat in [app/streamlit_app.py](../app/streamlit_app.py) en de
 lokale/deploymentinstructies staan in [app/README.md](../app/README.md).
 

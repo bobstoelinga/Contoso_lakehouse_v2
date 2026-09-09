@@ -2,6 +2,31 @@
 
 Streamlit-operatorconsole voor de bestaande Databricks audit/control plane.
 
+## URLs en Databricks CLI
+
+Lokale Streamlit-app:
+
+```text
+http://localhost:8501/
+```
+
+Gedeployde Databricks App:
+
+```text
+https://contoso-control-room-7405619535862062.2.azure.databricksapps.com
+```
+
+Databricks workspace:
+
+[Databricks](https://adb-7405619535862062.2.azuredatabricks.net/?o=7405619535862062)
+
+Authenticeer met Databricks en toon de gedeployde apps:
+
+```powershell
+databricks auth login --host https://adb-7405619535862062.2.azuredatabricks.net
+databricks apps list --profile contoso-dev
+```
+
 ## Lokaal starten
 
 Installeer de dependencies uit `app/requirements.txt` en configureer:
